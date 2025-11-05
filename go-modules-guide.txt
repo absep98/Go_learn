@@ -1,0 +1,316 @@
+/*
+=================================================================
+        GO MODULES & go mod tidy - COMPLETE GUIDE
+=================================================================
+
+WHAT IS GO MODULES?
+- Go's official dependency management system
+- Tracks which packages your project uses
+- Manages package versions to avoid conflicts
+- Similar to: npm (Node.js), pip (Python), Maven (Java)
+
+FILES INVOLVED:
+1. go.mod  - Lists your project dependencies
+2. go.sum  - Contains checksums for dependency versions
+3. .mod files in $GOPATH/pkg/mod - Cached packages
+*/
+
+// EXAMPLE 1: What is go.mod?
+/*
+Module File: go.mod
+--------------------
+
+module myapp                    ← Your project's module name
+
+go 1.21                        ← Go version used
+
+require (                      ← Your dependencies
+    github.com/user/pkg v1.2.3
+    github.com/other/pkg v0.1.0
+)
+
+exclude github.com/bad/pkg v1.0.0    ← Optional: versions to avoid
+replace github.com/old/pkg => ./local/path  ← Optional: redirect imports
+*/
+
+// EXAMPLE 2: What is go.sum?
+/*
+File: go.sum
+------------
+
+github.com/user/pkg v1.2.3 h1:xxx...yyy=
+github.com/user/pkg v1.2.3/go.mod h1:aaa...bbb=
+
+- h1: hash of the module source code
+- /go.mod h1: hash of just the go.mod file
+- Ensures package integrity (security!)
+*/
+
+// EXAMPLE 3: WHAT DOES go mod tidy DO?
+
+/*
+BEFORE go mod tidy:
+──────────────────
+
+main.go imports:
+  - "fmt"            (built-in, no entry needed)
+  - "encoding/json"  (built-in, no entry needed)
+  - "github.com/user/unused-pkg"  (UNUSED - not imported)
+  - "github.com/user/external-pkg"  (USED)
+
+go.mod has:
+  ✗ require github.com/user/unused-pkg v1.0.0
+  ✓ require github.com/user/external-pkg v1.0.0
+  ✗ require github.com/missing/pkg v1.0.0 (not used in code!)
+
+
+AFTER go mod tidy:
+─────────────────
+
+go.mod becomes:
+  ✓ require github.com/user/external-pkg v1.0.0
+  
+- Removed: unused-pkg (not in go.mod anymore)
+- Added: any packages you imported but were missing
+- Updated: version constraints if needed
+*/
+
+// EXAMPLE 4: COMMON go mod COMMANDS
+
+/*
+go mod init <name>         - Initialize new module
+  $ go mod init myapp
+  Creates: go.mod file
+
+go mod tidy                - Clean up dependencies
+  $ go mod tidy
+  Removes unused, adds missing
+
+go mod vendor              - Copy dependencies locally
+  $ go mod vendor
+  Creates: vendor/ folder
+
+go mod download            - Download dependencies
+  $ go mod download
+  Caches packages
+
+go mod graph               - Show dependency tree
+  $ go mod graph
+
+go mod why <package>       - Why is package needed?
+  $ go mod why github.com/user/pkg
+
+go get <package>           - Add/update dependency
+  $ go get github.com/user/pkg@v1.2.3
+*/
+
+// EXAMPLE 5: WORKFLOW IN PRACTICE
+
+/*
+Step 1: Start a new project
+─────────────────────────────
+$ mkdir myapp
+$ cd myapp
+$ go mod init myapp
+→ Creates: go.mod with "module myapp"
+
+
+Step 2: Import packages in your code
+─────────────────────────────────────
+// main.go
+package main
+import (
+    "fmt"
+    "github.com/sirupsen/logrus"
+)
+
+func main() {
+    logrus.Info("Hello")
+}
+
+
+Step 3: Run go mod tidy
+──────────────────────
+$ go mod tidy
+→ go.mod now has: require github.com/sirupsen/logrus v1.9.2
+→ go.sum gets the checksums
+→ Packages are downloaded to $GOPATH/pkg/mod
+
+
+Step 4: Build/Run
+────────────────
+$ go run main.go
+→ Works! All dependencies are managed
+*/
+
+// EXAMPLE 6: WHAT HAPPENS WITHOUT go.mod?
+
+/*
+Error you saw:
+──────────────
+"go: go.mod file not found in current directory or any parent directory"
+
+This means:
+- You're trying to use Go modules
+- But no go.mod file exists
+- Go doesn't know what your project is or what it depends on
+
+SOLUTION:
+$ go mod init myapp
+*/
+
+// EXAMPLE 7: VERSION MANAGEMENT
+
+/*
+go.mod version syntax:
+──────────────────────
+
+require github.com/user/pkg v1.2.3        ← Exact version
+
+require (
+    github.com/user/pkg v1.2.3
+    github.com/other/pkg latest           ← Latest version
+)
+
+Semantic Versioning: v1.2.3
+  1 = Major version (breaking changes)
+  2 = Minor version (new features)
+  3 = Patch version (bug fixes)
+
+require github.com/user/pkg >= v1.0.0    ← Version constraint
+require github.com/user/pkg < v2.0.0
+require github.com/user/pkg ^1.2.3       ← Compatible
+require github.com/user/pkg ~1.2.3       ← Patch level
+*/
+
+// EXAMPLE 8: COMMON GOTCHAS
+
+/*
+Gotcha 1: Circular dependencies
+────────────────────────────────
+Can't have: A imports B, B imports A
+Go will error during build
+
+Gotcha 2: Version conflicts
+───────────────────────────
+If two packages need different versions of pkg:
+require pkg v1.0.0  (from package A)
+require pkg v2.0.0  (from package B)
+
+Go tries to find compatible version
+Otherwise: manual intervention needed
+
+Gotcha 3: Indirect dependencies
+───────────────────────────────
+go.mod shows:
+require github.com/user/pkg v1.0.0
+
+But pkg depends on other packages
+Those are listed as "indirect"
+require github.com/dep/pkg v1.0.0 // indirect
+
+Gotcha 4: go.sum not synced
+─────────────────────────────
+Always run: go mod tidy
+Before pushing to git!
+*/
+
+// EXAMPLE 9: PRACTICAL WORKFLOW
+
+/*
+Scenario: You need to use a logging package
+
+Step 1: Import it in code
+──────────────────────────
+// main.go
+package main
+import "github.com/sirupsen/logrus"
+
+func main() {
+    logrus.Info("Hello")
+}
+
+
+Step 2: Run code
+────────────────
+$ go run main.go
+→ Go automatically:
+  - Downloads the package
+  - Updates go.mod
+  - Updates go.sum
+  - Runs your code
+
+
+Step 3: Check what happened
+────────────────────────────
+$ cat go.mod
+→ Shows: require github.com/sirupsen/logrus v1.9.2
+
+$ cat go.sum
+→ Shows: github.com/sirupsen/logrus v1.9.2 h1:xxxxx
+
+
+Step 4: Clean up
+────────────────
+$ go mod tidy
+→ Removes unused packages
+→ Ensures everything is in sync
+*/
+
+// EXAMPLE 10: WHEN TO USE go mod tidy
+
+/*
+Use go mod tidy when:
+───────────────────
+
+1. After removing imports from code
+   (cleans up dependencies)
+
+2. After adding new imports
+   (ensures they're added to go.mod)
+
+3. Before committing to git
+   (ensures go.mod and go.sum are clean)
+
+4. When updating Go version
+   (ensures compatibility)
+
+5. When collaborating with others
+   (ensures consistent dependencies)
+
+Best Practice:
+$ go mod tidy
+$ git add go.mod go.sum
+$ git commit -m "Update dependencies"
+*/
+
+// EXAMPLE 11: CHECKING DEPENDENCY STATUS
+
+/*
+See what dependencies you have:
+$ go list -m all
+
+See available versions of a package:
+$ go list -m github.com/user/pkg@latest
+
+See why a package is needed:
+$ go mod why github.com/sirupsen/logrus
+
+See all indirect dependencies:
+$ go mod graph | grep indirect
+*/
+
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Go Modules Learning Guide")
+	fmt.Println("=" * 50)
+	fmt.Println("Key Points:")
+	fmt.Println("1. go.mod tracks your dependencies")
+	fmt.Println("2. go.sum ensures package integrity")
+	fmt.Println("3. go mod tidy cleans everything up")
+	fmt.Println("4. Always run 'go mod tidy' before git commit")
+	fmt.Println("5. Built-in packages (fmt, os, etc) don't need entries")
+}

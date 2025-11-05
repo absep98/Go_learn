@@ -1,0 +1,22 @@
+Here is your Go Maps "Interview-Ready" Cheatsheet. This covers everything from basic syntax to the high-level memory mechanics we discussed.📋 Go Maps: The Definitive Cheatsheet1. Initialization vs. DeclarationFeaturevar m map[K]Vm := make(map[K]V)m := map[K]V{}StateNilInitializedInitializedMemoryNo header allocatedHeader (hmap) allocatedHeader (hmap) allocatedReadingSafe (Returns Zero Value)Safe (Returns Zero Value)Safe (Returns Zero Value)WritingPANIC ❌Safe ✅Safe ✅2. Zero Value LookupsIf a key is missing, Go returns the Zero Value of the value type:int $\rightarrow$ 0string $\rightarrow$ ""bool $\rightarrow$ falsepointers/slices/maps $\rightarrow$ nilThe "Comma OK" Pattern:Goval, ok := m["key"]
+if !ok {
+    // Key definitely does not exist in the map
+}
+3. The Struct Pointer Rule (Crucial)You cannot modify a struct field inside a map directly if the map stores values.Go// ❌ BAD: Map of values
+m := map[string]User{"a": {Age: 10}}
+m["a"].Age = 11 // Compile Error: cannot assign to struct field in map
+
+// ✅ GOOD: Map of pointers
+m := map[string]*User{"a": {Age: 10}}
+m["a"].Age = 11 // Works!
+4. Reference SemanticsMaps are reference types. When you pass a map to a function, the function works on the same underlying data.Gofunc change(m map[string]int) {
+    m["done"] = 1 
+}
+
+// In main:
+myMap := make(map[string]int)
+change(myMap)
+fmt.Println(myMap["done"]) // Prints 1
+5. Advanced PatternsMap of Slices: You don't need to check for existence before appending.Gom := make(map[string][]int)
+m["ids"] = append(m["ids"], 101) // Works even if "ids" is missing
+Deletion: delete(m, "key") is safe even if the key isn't there.Iteration: for k, v := range m is random. Never rely on map order.6. Interview "Red Flags"Thread Safety: Maps are not thread-safe. Concurrent writes will crash the program. (Use sync.Map or Mutexes).Key Types: Keys must be comparable (you can use == on them).Allowed: string, int, float, bool, chan, pointer, interface.Forbidden: slice, map, func.Pro-Tip for your Review:"If you see a var m map in code, your first thought should be: Where is the make? If there is no make or {} before the first assignment, that code is a ticking time bomb."
