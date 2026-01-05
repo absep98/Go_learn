@@ -54,6 +54,15 @@ func main() {
 
 	http.HandleFunc("/health", handlers.HealthHandler)
 	http.HandleFunc("/ping", handlers.PingHandler)
+	http.HandleFunc("/entries", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			handlers.CreateEntry(w, r)
+		} else if r.Method == http.MethodGet {
+			handlers.GetEntries(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
 	log.Printf("Server starting on port %s", port)
 	http.ListenAndServe(":"+port, nil)
