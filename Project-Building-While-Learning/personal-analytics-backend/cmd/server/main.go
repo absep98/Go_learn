@@ -10,6 +10,15 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Request comes in
+//       ↓
+// Handler validates (entries.go)
+//       ↓
+// Struct defines shape (CreateEntryRequest)
+//       ↓
+// DB function saves it (db.go - InsertEntry)
+//       ↓
+// Table schema stores it (db.go - createTables)
 // ResponseWrite is interface defines 2 function Write() and WriteHeader()
 // w satisfies interfaces, you can write to it.(the output this is your connection
 // back to user anything your write goes to their browser/client)
@@ -37,6 +46,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
+	// The "Defer" Magic: defer is a Go keyword that says: "Wait until this entire function (main) is finished, then immediately run this command."
 	defer db.CloseDB()
 
 	// As functions are values(First class citizens) you can pass a function just
@@ -54,7 +64,13 @@ func main() {
 
 	http.HandleFunc("/health", handlers.HealthHandler)
 	http.HandleFunc("/ping", handlers.PingHandler)
-	http.HandleFunc("/entries", func(w http.ResponseWriter, r *http.Request) {
+
+	// Auth endpoints (no protection needed)
+	http.HandleFunc("/register", handlers.Register)
+	http.HandleFunc("/login", handlers.Login)
+
+	// Entries endpoints (PROTECTED - requires authentication)
+	http.HandleFunc("/entries", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			handlers.CreateEntry(w, r)
 		} else if r.Method == http.MethodGet {
@@ -62,7 +78,7 @@ func main() {
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 
 	log.Printf("Server starting on port %s", port)
 	http.ListenAndServe(":"+port, nil)

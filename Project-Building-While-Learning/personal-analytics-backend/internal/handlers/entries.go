@@ -2,15 +2,17 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"personal-analytics-backend/internal/db"
 )
 
 // CreateEntryRequest represents the incoming request body
 type CreateEntryRequest struct {
-	UserID int    `json:"user_id"`
-	Text   string `json:"text"`
-	Mood   int    `json:"mood"`
+	UserID   int    `json:"user_id"`
+	Text     string `json:"text"`
+	Mood     int    `json:"mood"`
+	Category string `json:"category"`
 }
 
 // The json:"..." tags:
@@ -31,8 +33,19 @@ type CreateEntryResponse struct {
 // Means: "If ID is 0 (empty), don't include it in the JSON"
 // Used for error responses where there's no ID
 
+// errorResponse is a helper function to send error responses consistently
+// Reduces code duplication across all validation checks
+func errorResponse(w http.ResponseWriter, status int, message string) {
+	respondJSON(w, status, CreateEntryResponse{
+		Success: false,
+		Message: message,
+	})
+}
+
 // CreateEntry handles POST /entries
 func CreateEntry(w http.ResponseWriter, r *http.Request) {
+	log.Println("📨 POST /entries - Request received")
+
 	// Only allow POST method
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -51,10 +64,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 	// if it fails : JSON malformed typo, mussing comma, etc or send back error "invalid request body"
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		respondJSON(w, http.StatusBadRequest, CreateEntryResponse{
-			Success: false,
-			Message: "Invalid request body",
-		})
+		errorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -62,40 +72,34 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 	// checks if userid is valid if not reject it
 	// UserID of 0 or -ve makes no sense text being empty is useless mood outisde 1-10 is invalid
 	if req.UserID <= 0 {
-		respondJSON(w, http.StatusBadRequest, CreateEntryResponse{
-			Success: false,
-			Message: "user_id must be positive",
-		})
+		errorResponse(w, http.StatusBadRequest, "user_id must be positive")
 		return
 	}
 
 	if req.Text == "" {
-		respondJSON(w, http.StatusBadRequest, CreateEntryResponse{
-			Success: false,
-			Message: "text cannot be empty",
-		})
+		errorResponse(w, http.StatusBadRequest, "text cannot be empty")
 		return
 	}
 
 	if req.Mood < 1 || req.Mood > 10 {
-		respondJSON(w, http.StatusBadRequest, CreateEntryResponse{
-			Success: false,
-			Message: "mood must be between 1 and 10",
-		})
+		errorResponse(w, http.StatusBadRequest, "mood must be between 1 and 10")
+		return
+	}
+
+	if req.Category == "" {
+		errorResponse(w, http.StatusBadRequest, "category cannot be empty")
 		return
 	}
 
 	// Insert into database
-	id, err := db.InsertEntry(req.UserID, req.Text, req.Mood)
+	id, err := db.InsertEntry(req.UserID, req.Text, req.Mood, req.Category)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, CreateEntryResponse{
-			Success: false,
-			Message: "Failed to save entry",
-		})
+		errorResponse(w, http.StatusInternalServerError, "Failed to save entry")
 		return
 	}
 	// All above are checks if passed then only allow to save it
 	// Success response
+	log.Printf("✅ Entry created successfully with ID: %d", id)
 	respondJSON(w, http.StatusCreated, CreateEntryResponse{
 		Success: true,
 		Message: "Entry created successfully",
@@ -104,16 +108,43 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetEntries handles GET /entries
+// Returns entries for the authenticated user only
 func GetEntries(w http.ResponseWriter, r *http.Request) {
+	log.Println("📚 GET /entries - Request received")
+
 	// Only allow GET method
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Get all entries from database
-	entries, err := db.GetAllEntries()
+	// Get authenticated user_id from context (middleware puts it there)
+	userIDValue := r.Context().Value("user_id")
+	if userIDValue == nil {
+		// This shouldn't happen if middleware is working, but check anyway
+		respondJSON(w, http.StatusUnauthorized, map[string]interface{}{
+			"success": false,
+			"message": "User not authenticated",
+		})
+		return
+	}
+
+	userID, ok := userIDValue.(int64)
+	if !ok {
+		log.Printf("❌ Failed to extract user_id from context: %v", userIDValue)
+		respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Invalid authentication data",
+		})
+		return
+	}
+
+	log.Printf("🔍 Fetching entries for user ID: %d", userID)
+
+	// Get entries for this user only
+	entries, err := db.GetEntriesByUser(userID)
 	if err != nil {
+		log.Printf("❌ Database error: %v", err)
 		respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false,
 			"message": "Failed to fetch entries",
@@ -127,6 +158,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Success response with entries
+	log.Printf("✅ Returning %d entries for user %d", len(entries), userID)
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"count":   len(entries),

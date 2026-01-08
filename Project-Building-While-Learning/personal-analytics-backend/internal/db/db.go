@@ -30,7 +30,7 @@ func InitDB(dbPath string) error {
 	var err error
 
 	// Open SQLite database (creates file if not exists)
-	DB, err = sql.Open("sqlite", dbPath)
+	DB, err = sql.Open("sqlite", dbPath) // or ":memory:" as in-memory DB
 	if err != nil {
 		return err
 	}
@@ -54,6 +54,20 @@ func InitDB(dbPath string) error {
 
 // createTables creates all required tables if they don't exist
 func createTables() error {
+	// Users table - stores user accounts
+	usersTable := `
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		email TEXT UNIQUE NOT NULL,
+		password_hash TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+
+	_, err := DB.Exec(usersTable)
+	if err != nil {
+		return err
+	}
+
 	// Entries table - stores mood/activity data
 	entriesTable := `
 	CREATE TABLE IF NOT EXISTS entries (
@@ -61,10 +75,11 @@ func createTables() error {
 		user_id INTEGER NOT NULL,
 		text TEXT,
 		mood INTEGER,
+		category TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
 
-	_, err := DB.Exec(entriesTable)
+	_, err = DB.Exec(entriesTable)
 	if err != nil {
 		return err
 	}
@@ -75,12 +90,12 @@ func createTables() error {
 
 // InsertEntry inserts a new entry into the database
 // Puts new data INTO the database (like adding a new row to an Excel sheet)
-// Takes 3 inputs: userID (which user), text (what they wrote), mood (their mood score)
-func InsertEntry(userID int, text string, mood int) (int64, error) {
+// Takes 5 inputs: userID (which user), text (what they wrote), mood (their mood score), tags (list of tags), category (entry type)
+func InsertEntry(userID int, text string, mood int, category string) (int64, error) {
 	// The ? marks are placeholders (like blanks in a form)
-	query := `INSERT INTO entries (user_id, text, mood) VALUES (?, ?, ?)`
+	query := `INSERT INTO entries (user_id, text, mood, category) VALUES (?, ?, ?, ?)`
 	// "Execute the query and fill in the ? marks with actual values."
-	result, err := DB.Exec(query, userID, text, mood)
+	result, err := DB.Exec(query, userID, text, mood, category)
 	if err != nil {
 		return 0, err
 	}
@@ -107,7 +122,7 @@ func InsertEntry(userID int, text string, mood int) (int64, error) {
 }
 */
 func GetAllEntries() ([]map[string]interface{}, error) {
-	query := `SELECT id, user_id, text, mood, created_at FROM entries ORDER BY created_at DESC`
+	query := `SELECT id, user_id, text, mood, category, tags, created_at FROM entries ORDER BY created_at DESC`
 
 	rows, err := DB.Query(query)
 	if err != nil {
@@ -120,9 +135,8 @@ func GetAllEntries() ([]map[string]interface{}, error) {
 
 	for rows.Next() {
 		var id, userID, mood int
-		var text, createdAt string
-
-		err := rows.Scan(&id, &userID, &text, &mood, &createdAt)
+		var text, category, createdAt string
+		err := rows.Scan(&id, &userID, &text, &mood, &category, &createdAt)
 		if err != nil {
 			return nil, err
 		}
@@ -132,6 +146,7 @@ func GetAllEntries() ([]map[string]interface{}, error) {
 			"user_id":    userID,
 			"text":       text,
 			"mood":       mood,
+			"category":   category,
 			"created_at": createdAt,
 		}
 
@@ -139,6 +154,82 @@ func GetAllEntries() ([]map[string]interface{}, error) {
 	}
 
 	return entries, nil
+}
+
+// GetEntriesByUser retrieves all entries for a specific user
+// Used when user is authenticated - only show their own entries
+func GetEntriesByUser(userID int64) ([]map[string]interface{}, error) {
+	query := `SELECT id, user_id, text, mood, category, created_at 
+	          FROM entries 
+	          WHERE user_id = ?
+	          ORDER BY created_at DESC`
+
+	rows, err := DB.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []map[string]interface{}
+
+	for rows.Next() {
+		var id, userIDResult int64
+		var text, category, createdAt string
+		var mood int
+
+		err := rows.Scan(&id, &userIDResult, &text, &mood, &category, &createdAt)
+		if err != nil {
+			return nil, err
+		}
+
+		entry := map[string]interface{}{
+			"id":         id,
+			"user_id":    userIDResult,
+			"text":       text,
+			"mood":       mood,
+			"category":   category,
+			"created_at": createdAt,
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+// CreateUser inserts a new user into the database
+// Takes email and hashed password (NOT plain password!)
+func CreateUser(email string, passwordHash string) (int64, error) {
+	query := `INSERT INTO users (email, password_hash) VALUES (?, ?)`
+
+	result, err := DB.Exec(query, email, passwordHash)
+	if err != nil {
+		return 0, err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	log.Printf("User created with ID: %d", id)
+	return id, nil
+}
+
+// GetUserByEmail retrieves a user by their email
+// Returns user_id and password_hash for login verification
+func GetUserByEmail(email string) (int64, string, error) {
+	query := `SELECT id, password_hash FROM users WHERE email = ?`
+
+	var userID int64
+	var passwordHash string
+
+	err := DB.QueryRow(query, email).Scan(&userID, &passwordHash)
+	if err != nil {
+		return 0, "", err
+	}
+
+	return userID, passwordHash, nil
 }
 
 // CloseDB closes the database connection
