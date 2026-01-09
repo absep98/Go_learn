@@ -19,12 +19,13 @@ import (
 // DB function saves it (db.go - InsertEntry)
 //       ↓
 // Table schema stores it (db.go - createTables)
-// ResponseWrite is interface defines 2 function Write() and WriteHeader()
-// w satisfies interfaces, you can write to it.(the output this is your connection
-// back to user anything your write goes to their browser/client)
-// r* http.Request is a pointer to struct containing all info about incoming request url,headers
 
 /*
+	ResponseWrite is interface defines 2 function Write() and WriteHeader()
+	w satisfies interfaces, you can write to it.(the output this is your connection
+	back to user anything your write goes to their browser/client)
+	r* http.Request is a pointer to struct containing all info about incoming request url,headers
+	
 	func healthHandler(w http.ResponseWriter, r *http.Request) {
 		// F stands for file format allows you to print to any destination
 		fmt.Fprintln(w, "ok")

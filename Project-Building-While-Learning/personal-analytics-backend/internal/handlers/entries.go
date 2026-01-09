@@ -9,7 +9,6 @@ import (
 
 // CreateEntryRequest represents the incoming request body
 type CreateEntryRequest struct {
-	UserID   int    `json:"user_id"`
 	Text     string `json:"text"`
 	Mood     int    `json:"mood"`
 	Category string `json:"category"`
@@ -52,6 +51,20 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userIDValue := r.Context().Value("user_id")
+	if userIDValue == nil {
+		errorResponse(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
+	userID, ok := userIDValue.(int64)
+	if !ok {
+		errorResponse(w, http.StatusInternalServerError, "Invalid authentication data")
+		return
+	}
+
+	log.Printf("🔍 Creating entry for user ID: %d", userID)
+
 	// Parse JSON request body
 	var req CreateEntryRequest
 
@@ -63,16 +76,12 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 	// .Decode(&req) = convert JSON into our struct, & means put the decoded data directly into req not a copy.
 	// if it fails : JSON malformed typo, mussing comma, etc or send back error "invalid request body"
 	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		errorResponse(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
 
 	// Validate input
 	// checks if userid is valid if not reject it
 	// UserID of 0 or -ve makes no sense text being empty is useless mood outisde 1-10 is invalid
-	if req.UserID <= 0 {
-		errorResponse(w, http.StatusBadRequest, "user_id must be positive")
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -92,7 +101,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert into database
-	id, err := db.InsertEntry(req.UserID, req.Text, req.Mood, req.Category)
+	id, err := db.InsertEntry(int(userID), req.Text, req.Mood, req.Category)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to save entry")
 		return
