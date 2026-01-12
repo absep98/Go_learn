@@ -25,7 +25,7 @@ import (
 	w satisfies interfaces, you can write to it.(the output this is your connection
 	back to user anything your write goes to their browser/client)
 	r* http.Request is a pointer to struct containing all info about incoming request url,headers
-	
+
 	func healthHandler(w http.ResponseWriter, r *http.Request) {
 		// F stands for file format allows you to print to any destination
 		fmt.Fprintln(w, "ok")
@@ -63,23 +63,24 @@ func main() {
 		port = "8080"
 	}
 
-	http.HandleFunc("/health", handlers.HealthHandler)
-	http.HandleFunc("/ping", handlers.PingHandler)
+	http.HandleFunc("/health", handlers.LoggingMiddleware(handlers.HealthHandler))
+	http.HandleFunc("/ping", handlers.LoggingMiddleware(handlers.PingHandler))
 
 	// Auth endpoints (no protection needed)
-	http.HandleFunc("/register", handlers.Register)
-	http.HandleFunc("/login", handlers.Login)
+	http.HandleFunc("/register", handlers.LoggingMiddleware(handlers.Register))
+	http.HandleFunc("/login", handlers.LoggingMiddleware(handlers.Login))
 
 	// Entries endpoints (PROTECTED - requires authentication)
-	http.HandleFunc("/entries", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			handlers.CreateEntry(w, r)
-		} else if r.Method == http.MethodGet {
-			handlers.GetEntries(w, r)
-		} else {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	}))
+	http.HandleFunc("/entries", handlers.LoggingMiddleware(
+		handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				handlers.CreateEntry(w, r)
+			} else if r.Method == http.MethodGet {
+				handlers.GetEntries(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		})))
 
 	log.Printf("Server starting on port %s", port)
 	http.ListenAndServe(":"+port, nil)
