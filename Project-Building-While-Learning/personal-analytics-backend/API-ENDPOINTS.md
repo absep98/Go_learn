@@ -13,6 +13,7 @@
 **Authentication:** None required
 
 **Request Body:**
+
 ```json
 {
     "email": "user@example.com",
@@ -21,11 +22,13 @@
 ```
 
 **Validation Rules:**
+
 - Email must contain `@` symbol
 - Password must be at least 6 characters
 - Email must be unique
 
 **Success Response (201 Created):**
+
 ```json
 {
     "success": true,
@@ -37,18 +40,21 @@
 **Error Responses:**
 
 **400 Bad Request** - Validation failure
+
 ```json
 {
     "success": false,
     "message": "email is required"
 }
 ```
+
 ```json
 {
     "success": false,
     "message": "invalid email format"
 }
 ```
+
 ```json
 {
     "success": false,
@@ -57,6 +63,7 @@
 ```
 
 **409 Conflict** - Duplicate email
+
 ```json
 {
     "success": false,
@@ -73,6 +80,7 @@
 **Authentication:** None required
 
 **Request Body:**
+
 ```json
 {
     "email": "user@example.com",
@@ -81,10 +89,12 @@
 ```
 
 **Validation Rules:**
+
 - Email and password required
 - Must match existing user credentials
 
 **Success Response (200 OK):**
+
 ```json
 {
     "success": true,
@@ -94,6 +104,7 @@
 ```
 
 **Token Details:**
+
 - Algorithm: HS256
 - Expires: 24 hours after generation
 - Contains: user_id claim
@@ -101,6 +112,7 @@
 **Error Responses:**
 
 **400 Bad Request** - Missing fields
+
 ```json
 {
     "success": false,
@@ -109,6 +121,7 @@
 ```
 
 **401 Unauthorized** - Invalid credentials
+
 ```json
 {
     "success": false,
@@ -123,6 +136,7 @@
 ## 🔒 Protected Endpoints (Require JWT Token)
 
 **All protected endpoints require:**
+
 ```
 Authorization: Bearer <your-jwt-token>
 ```
@@ -134,6 +148,7 @@ Authorization: Bearer <your-jwt-token>
 **Authentication:** Required (JWT token)
 
 **Request Headers:**
+
 ```
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
@@ -141,6 +156,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 **Request Body:** None
 
 **Success Response (200 OK):**
+
 ```json
 {
     "success": true,
@@ -167,6 +183,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **Empty Database Response (200 OK):**
+
 ```json
 {
     "success": true,
@@ -178,6 +195,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 **Error Responses:**
 
 **401 Unauthorized** - No token provided
+
 ```json
 {
     "success": false,
@@ -186,6 +204,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **401 Unauthorized** - Invalid token
+
 ```json
 {
     "success": false,
@@ -194,6 +213,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **401 Unauthorized** - Wrong format
+
 ```json
 {
     "success": false,
@@ -210,11 +230,13 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 **Authentication:** Required (JWT token)
 
 **Request Headers:**
+
 ```
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **Request Body:**
+
 ```json
 {
     "text": "Had a great day!",
@@ -224,12 +246,14 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **Validation Rules:**
+
 - `text`: Required, cannot be empty
 - `mood`: Required, must be integer 1-10
 - `category`: Required, cannot be empty
 - `user_id`: Automatically extracted from JWT token (not in request body)
 
 **Success Response (201 Created):**
+
 ```json
 {
     "success": true,
@@ -241,18 +265,21 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 **Error Responses:**
 
 **400 Bad Request** - Validation failures
+
 ```json
 {
     "success": false,
     "message": "text cannot be empty"
 }
 ```
+
 ```json
 {
     "success": false,
     "message": "mood must be between 1 and 10"
 }
 ```
+
 ```json
 {
     "success": false,
@@ -263,6 +290,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 **401 Unauthorized** - Missing/invalid token (same as GET /entries)
 
 **405 Method Not Allowed** - Wrong HTTP method
+
 ```json
 Method not allowed
 ```
@@ -278,6 +306,7 @@ Method not allowed
 **Authentication:** None required
 
 **Success Response (200 OK):**
+
 ```
 OK
 ```
@@ -291,6 +320,7 @@ OK
 **Authentication:** None required
 
 **Success Response (200 OK):**
+
 ```json
 {
     "message": "pong"
@@ -318,6 +348,7 @@ OK
 ### PowerShell
 
 **Register:**
+
 ```powershell
 $body = @{
     email = "test@example.com"
@@ -328,6 +359,7 @@ Invoke-RestMethod -Uri http://localhost:8080/register -Method Post -Body $body -
 ```
 
 **Login:**
+
 ```powershell
 $body = @{
     email = "test@example.com"
@@ -339,6 +371,7 @@ $token = $response.token
 ```
 
 **Create Entry:**
+
 ```powershell
 $headers = @{ "Authorization" = "Bearer $token" }
 $body = @{
@@ -351,6 +384,7 @@ Invoke-RestMethod -Uri http://localhost:8080/entries -Method Post -Headers $head
 ```
 
 **Get Entries:**
+
 ```powershell
 $headers = @{ "Authorization" = "Bearer $token" }
 Invoke-RestMethod -Uri http://localhost:8080/entries -Method Get -Headers $headers
@@ -359,6 +393,7 @@ Invoke-RestMethod -Uri http://localhost:8080/entries -Method Get -Headers $heade
 ### cURL
 
 **Register:**
+
 ```bash
 curl -X POST http://localhost:8080/register \
   -H "Content-Type: application/json" \
@@ -366,6 +401,7 @@ curl -X POST http://localhost:8080/register \
 ```
 
 **Login:**
+
 ```bash
 curl -X POST http://localhost:8080/login \
   -H "Content-Type: application/json" \
@@ -373,6 +409,7 @@ curl -X POST http://localhost:8080/login \
 ```
 
 **Create Entry:**
+
 ```bash
 curl -X POST http://localhost:8080/entries \
   -H "Content-Type: application/json" \
@@ -381,6 +418,7 @@ curl -X POST http://localhost:8080/entries \
 ```
 
 **Get Entries:**
+
 ```bash
 curl -X GET http://localhost:8080/entries \
   -H "Authorization: Bearer YOUR_TOKEN_HERE"
@@ -403,6 +441,7 @@ curl -X GET http://localhost:8080/entries \
 All responses follow this pattern:
 
 **Success:**
+
 ```json
 {
     "success": true,
@@ -412,6 +451,7 @@ All responses follow this pattern:
 ```
 
 **Error:**
+
 ```json
 {
     "success": false,

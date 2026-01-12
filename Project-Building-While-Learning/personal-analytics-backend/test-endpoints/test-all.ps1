@@ -192,7 +192,7 @@ try {
         mood = 8
         category = "testing"
     } | ConvertTo-Json
-    
+
     $response = Invoke-RestMethod -Uri http://localhost:8080/entries -Method Post -Headers $headers -Body $entryBody -ContentType "application/json"
     Write-Host "✅ Entry created successfully!" -ForegroundColor Green
     Write-Host "Response: $($response | ConvertTo-Json)" -ForegroundColor Cyan
@@ -212,7 +212,7 @@ try {
         mood = 11
         category = "testing"
     } | ConvertTo-Json
-    
+
     $response = Invoke-RestMethod -Uri http://localhost:8080/entries -Method Post -Headers $headers -Body $invalidMoodBody -ContentType "application/json"
     Write-Host "❌ UNEXPECTED: Entry created with invalid mood!" -ForegroundColor Red
 }
@@ -231,7 +231,7 @@ try {
         mood = 5
         category = "testing"
     } | ConvertTo-Json
-    
+
     $response = Invoke-RestMethod -Uri http://localhost:8080/entries -Method Post -Headers $headers -Body $emptyTextBody -ContentType "application/json"
     Write-Host "❌ UNEXPECTED: Entry created with empty text!" -ForegroundColor Red
 }

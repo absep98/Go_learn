@@ -3,6 +3,7 @@
 ## What I Built This Week
 
 **Days 8-10: Authentication System**
+
 - User registration with email validation
 - bcrypt password hashing (never store plain text!)
 - JWT token generation on login
@@ -11,6 +12,7 @@
 - User-specific data isolation
 
 **Days 11-12: Polish & Testing**
+
 - Better error messages (specific token errors)
 - Request logging middleware
 - Comprehensive test suite (18 tests)
@@ -25,6 +27,7 @@
 **What clicked:** JWT tokens are like "tickets" that prove you logged in. The server doesn't need to remember you logged in - the signed token proves it.
 
 **The flow:**
+
 1. User logs in → Server creates token with user_id inside
 2. User sends token with every request
 3. Server verifies signature → extracts user_id → uses it
@@ -63,6 +66,7 @@ userID := r.Context().Value("user_id").(int64)
 **The challenge:** JWT claims return numbers as `float64` (JSON limitation), but database expects `int`.
 
 **The chain:**
+
 ```
 JWT (float64) → Middleware (int64) → Handler → Database (int)
 ```
@@ -78,6 +82,7 @@ JWT (float64) → Middleware (int64) → Handler → Database (int)
 **The feeling:** "Things are piling up, I'm not remembering syntax, everything feels complex."
 
 **What helped:**
+
 - Agent created ARCHITECTURE-MAP.md and CHEAT-SHEET.md
 - Stopped learning new things, just read/reviewed existing code
 - Tested API manually to see it working
@@ -90,6 +95,7 @@ JWT (float64) → Middleware (int64) → Handler → Database (int)
 **The error:** `cannot use userID (int64) as int`
 
 **What I learned:**
+
 - Go doesn't auto-convert even between int types
 - JWT stores numbers as float64 (JSON)
 - Need explicit conversion: `int(userID)`
@@ -101,6 +107,7 @@ JWT (float64) → Middleware (int64) → Handler → Database (int)
 **Initial confusion:** How does `AuthMiddleware(handler)` actually work?
 
 **What clicked:** It returns a NEW function that:
+
 1. Does auth check
 2. Calls original handler if auth passes
 
@@ -111,6 +118,7 @@ It's function composition - wrapping one function with another.
 ## Skills Gained ✅
 
 ### Technical Skills
+
 - JWT token generation and verification
 - bcrypt password hashing
 - Middleware pattern implementation
@@ -120,6 +128,7 @@ It's function composition - wrapping one function with another.
 - Better error message design
 
 ### Conceptual Understanding
+
 - Stateless authentication vs sessions
 - Middleware composition pattern
 - Request lifecycle with middleware layers
@@ -128,6 +137,7 @@ It's function composition - wrapping one function with another.
 - Test-driven development benefits
 
 ### Debugging Skills
+
 - Reading Go compiler errors more effectively
 - Understanding type mismatch errors
 - Using logs to trace request flow
@@ -140,6 +150,7 @@ It's function composition - wrapping one function with another.
 ### 1. Would Start Testing Earlier
 
 I built comprehensive tests on Day 12, but having tests from Day 8 would have:
+
 - Caught bugs earlier
 - Given confidence during development
 - Served as documentation
@@ -148,13 +159,14 @@ I built comprehensive tests on Day 12, but having tests from Day 8 would have:
 
 ### 2. Would Draw Architecture First
 
-ARCHITECTURE-MAP.md was incredibly helpful, but created AFTER building. 
+ARCHITECTURE-MAP.md was incredibly helpful, but created AFTER building.
 
 **Next time:** Draw flow diagrams BEFORE coding to clarify thinking.
 
 ### 3. Would Take More Breaks
 
 Day 9 overload could have been avoided with:
+
 - More frequent consolidation breaks
 - Reviewing previous day's code before adding new features
 - Not pushing through when feeling overwhelmed
@@ -166,6 +178,7 @@ Day 9 overload could have been avoided with:
 ## Confidence Changes
 
 **Before Week 2:**
+
 - ✅ Could build CRUD APIs
 - ✅ Understood database operations
 - ❌ Authentication felt intimidating
@@ -173,6 +186,7 @@ Day 9 overload could have been avoided with:
 - ❌ Didn't understand JWT
 
 **After Week 2:**
+
 - ✅ Can implement JWT authentication from scratch
 - ✅ Can explain middleware pattern clearly
 - ✅ Understand security basics (hashing, signing)
@@ -187,13 +201,13 @@ Day 9 overload could have been avoided with:
 
 ### Story 1: "How I Implemented Authentication"
 
-"I built a JWT-based authentication system in Go. Users register with email/password, I hash the password with bcrypt, never storing plain text. On login, I verify the password and generate a JWT token containing their user_id, signed with a secret key. 
+"I built a JWT-based authentication system in Go. Users register with email/password, I hash the password with bcrypt, never storing plain text. On login, I verify the password and generate a JWT token containing their user_id, signed with a secret key.
 
 For protected routes, I use middleware that verifies the token signature, extracts the user_id, and passes it via Go's context to the handler. This ensures users can only access their own data."
 
 ### Story 2: "Debugging Type Mismatch"
 
-"I encountered an error where JWT claims returned user_id as float64 (JSON limitation), but my database function expected int. Go's strict typing caught this. I had to explicitly convert: float64 → int64 (in middleware for safety) → int (for database call). 
+"I encountered an error where JWT claims returned user_id as float64 (JSON limitation), but my database function expected int. Go's strict typing caught this. I had to explicitly convert: float64 → int64 (in middleware for safety) → int (for database call).
 
 This taught me Go's type system prevents subtle bugs. The compiler error was actually protecting me."
 
@@ -208,6 +222,7 @@ This consolidation made everything click. I realized I didn't need to memorize -
 ## What's Next (Week 3 Preview)
 
 **Planned Features:**
+
 - UPDATE and DELETE operations for entries
 - Pagination for GET /entries
 - Caching layer
@@ -215,6 +230,7 @@ This consolidation made everything click. I realized I didn't need to memorize -
 - Background job processing
 
 **Learning Focus:**
+
 - System design thinking (scaling considerations)
 - Performance optimization
 - Async processing with goroutines
@@ -251,6 +267,6 @@ That sentence alone changes my backend developer profile.
 
 ---
 
-**Status:** Week 2 Complete ✅  
-**Confidence Level:** High  
+**Status:** Week 2 Complete ✅
+**Confidence Level:** High
 **Ready for:** Week 3 (Scaling & Polish)

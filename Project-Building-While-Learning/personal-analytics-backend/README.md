@@ -17,6 +17,7 @@ This service is the backend engine for a personal analytics platform. Instead of
 ## What I Built
 
 ### Week 1 (Jan 2-7): Foundation
+
 - HTTP server with `net/http` standard library
 - SQLite database connection and schema design
 - Environment-based configuration
@@ -26,6 +27,7 @@ This service is the backend engine for a personal analytics platform. Instead of
 - Request logging middleware
 
 ### Week 2 (Jan 8-12): Authentication System
+
 - User registration with email validation
 - bcrypt password hashing (never store plain text)
 - JWT token generation on login
@@ -62,6 +64,7 @@ This service is the backend engine for a personal analytics platform. Instead of
 ```
 
 **Key Security Points:**
+
 - Passwords never stored in plain text (bcrypt hashing)
 - JWT tokens signed with secret (tamper-proof)
 - User_id from verified token only (no client manipulation)
@@ -70,18 +73,21 @@ This service is the backend engine for a personal analytics platform. Instead of
 ## What I Built (Week 1)
 
 ### Days 1-2: Foundation
+
 - HTTP server with `net/http` standard library
 - SQLite database connection and schema design
 - Environment-based configuration
 - Clean project structure (`cmd/` and `internal/` separation)
 
 ### Days 3-4: Core Features
+
 - **POST /entries** - Create mood/activity entries with full validation
 - **GET /entries** - Retrieve all entries as structured JSON
 - Input validation: userID, text length, mood range (1-10), category
 - Database persistence with parameterized queries (SQL injection safe)
 
 ### Days 5-6: Security & Consolidation
+
 - Learned SQL injection prevention (parameterized vs string concatenation)
 - Mastered JSON struct tags for API mapping
 - Implemented consistent error response patterns
@@ -139,6 +145,7 @@ See [API-ENDPOINTS.md](API-ENDPOINTS.md) for detailed documentation.
 ## Quick Start
 
 ### Prerequisites
+
 - Go 1.25.3 or higher
 - Git
 
@@ -278,6 +285,7 @@ personal-analytics-backend/
 ## Database Schema
 
 ### users table
+
 ```sql
 CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -288,6 +296,7 @@ CREATE TABLE users (
 ```
 
 ### entries table
+
 ```sql
 CREATE TABLE entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -303,6 +312,7 @@ CREATE TABLE entries (
 ## Testing
 
 **Test Coverage:** 18 comprehensive tests
+
 - Registration validation (4 tests)
 - Login authentication (4 tests)
 - Middleware protection (3 tests)
@@ -316,6 +326,7 @@ See [TESTING.md](TESTING.md) for detailed test results.
 ## What I Learned
 
 ### Week 1
+
 - Go HTTP server fundamentals
 - Database design and SQLite integration
 - JSON struct tags and API design
@@ -324,6 +335,7 @@ See [TESTING.md](TESTING.md) for detailed test results.
 - Error handling best practices
 
 ### Week 2
+
 - JWT token generation and verification
 - bcrypt password hashing
 - Middleware pattern for authentication
@@ -344,6 +356,7 @@ See [TESTING.md](TESTING.md) for detailed test results.
 ## Why This Matters for Interviews
 
 This project demonstrates:
+
 - ✅ **Authentication systems** - JWT, bcrypt, middleware
 - ✅ **Security awareness** - SQL injection prevention, password hashing
 - ✅ **API design** - RESTful endpoints, proper status codes
@@ -369,6 +382,7 @@ This is a learning project. Feel free to use as reference!
 GitHub: [@absep98](https://github.com/absep98)
 
 }
+
 ```
 
 **Validation Rules:**
@@ -409,18 +423,22 @@ Retrieves all entries ordered by creation time.
 ## What I Learned
 
 ### 1. 3-Layer Architecture
+
 Separation between handlers (HTTP logic), database layer (queries), and storage (SQLite). This makes code testable, maintainable, and easier to modify.
 
 ### 2. JSON Struct Tags
+
 Tags like `json:"user_id"` map between JSON keys (snake_case) and Go fields (PascalCase). Without tags, Go can't match `{"user_id": 101}` to `UserID int`.
 
 ### 3. SQL Injection Prevention
+
 **Safe:** `db.Exec("INSERT INTO ... VALUES (?, ?, ?)", val1, val2, val3)`
 **Vulnerable:** `db.Exec(fmt.Sprintf("INSERT INTO ... VALUES ('%s')", userInput))`
 
 Parameterized queries prevent attackers from injecting malicious SQL.
 
 ### 4. Go Patterns
+
 - Multiple return values for error handling: `result, err := function()`
 - `defer` for cleanup: `defer rows.Close()`
 - Early returns for validation: `if invalid { return error }`
@@ -486,16 +504,19 @@ Invoke-RestMethod -Uri http://localhost:8080/entries
 ## Roadmap
 
 **Week 2 (Jan 8-14):** Authentication & Authorization
+
 - JWT token generation and validation
 - User-specific data isolation
 - Protected routes with middleware
 
 **Week 3 (Jan 15-21):** Concurrency & Background Processing
+
 - Goroutines for async tasks
 - Worker pools with channels
 - AI summary generation (mock or real)
 
 **Week 4 (Jan 22-28):** Scaling & Production Readiness
+
 - Caching layer (in-memory or Redis)
 - Rate limiting
 - Metrics and monitoring
