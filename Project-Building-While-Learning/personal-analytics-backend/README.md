@@ -1,10 +1,71 @@
 # Personal Analytics Backend
 
-A production-ready Go backend with CRUD operations, database persistence, and security best practices.
+A production-ready Go backend with JWT authentication, protected API endpoints, database persistence, and comprehensive testing.
 
 ## Why This Exists
 
-This service is the backend engine for a personal analytics platform. Instead of building yet another TODO app, this focuses on real backend problems: data persistence, validation, security, and scalability—the kind of work that companies actually pay for.
+This service is the backend engine for a personal analytics platform. Instead of building yet another TODO app, this focuses on real backend problems: authentication, data persistence, security, and scalability—the kind of work that companies actually pay for.
+
+## Tech Stack
+
+- **Language:** Go 1.25.3
+- **Database:** SQLite (modernc.org/sqlite)
+- **Authentication:** JWT tokens (github.com/golang-jwt/jwt/v5)
+- **Security:** bcrypt password hashing
+- **Testing:** PowerShell test scripts
+
+## What I Built
+
+### Week 1 (Jan 2-7): Foundation
+- HTTP server with `net/http` standard library
+- SQLite database connection and schema design
+- Environment-based configuration
+- CRUD operations (POST/GET /entries)
+- Input validation and error handling
+- SQL injection prevention
+- Request logging middleware
+
+### Week 2 (Jan 8-12): Authentication System
+- User registration with email validation
+- bcrypt password hashing (never store plain text)
+- JWT token generation on login
+- Authentication middleware for protected routes
+- User-specific data isolation
+- Comprehensive test suite (18 tests)
+- Error message improvements
+
+## Authentication Flow
+
+```
+1. REGISTRATION
+   User → POST /register {email, password}
+        → Validate email format (@ required)
+        → Hash password with bcrypt
+        → Save to database
+        → Return success + user_id
+
+2. LOGIN
+   User → POST /login {email, password}
+        → Get user from database
+        → Compare password with hash (bcrypt)
+        → Generate JWT token (includes user_id)
+        → Return token
+
+3. ACCESSING PROTECTED ROUTES
+   User → GET/POST /entries (Header: Authorization: Bearer <token>)
+        → Middleware checks token
+        → Verify signature with JWT_SECRET
+        → Extract user_id from token
+        → Pass to handler in context
+        → Handler uses authenticated user_id
+        → Return user-specific data
+```
+
+**Key Security Points:**
+- Passwords never stored in plain text (bcrypt hashing)
+- JWT tokens signed with secret (tamper-proof)
+- User_id from verified token only (no client manipulation)
+- Each user only sees their own entries
 
 ## What I Built (Week 1)
 
@@ -30,42 +91,283 @@ This service is the backend engine for a personal analytics platform. Instead of
 ## Architecture
 
 ```
-HTTP Request
+User Request
+    ↓
+main.go - Route Registration
+    ↓
+LoggingMiddleware (logs all requests)
+    ↓
+AuthMiddleware (for protected routes)
+    - Verify JWT token
+    - Extract user_id
+    - Put in context
     ↓
 Handler Layer (internal/handlers/)
     - HTTP method validation
     - JSON parsing with struct tags
     - Input validation (sequential checks)
+    - Get user_id from context (protected routes)
     ↓
 Database Layer (internal/db/)
-    - Parameterized SQL queries
-    - CRUD operations (Create, Read)
+    - Parameterized SQL queries (SQL injection safe)
+    - CRUD operations
     ↓
 SQLite Storage (data.db)
-    - Persistent file-based database
+    - users table (email, password_hash)
+    - entries table (user_id, text, mood, category)
 ```
 
 ## API Endpoints
 
-### POST /entries
-Creates a new mood/activity entry.
+See [API-ENDPOINTS.md](API-ENDPOINTS.md) for detailed documentation.
 
-**Request:**
-```json
-{
-  "user_id": 101,
-  "text": "Productive day!",
-  "mood": 8,
-  "category": "work"
-}
+### Public Endpoints (No Authentication)
+
+**POST /register** - Create new user account
+**POST /login** - Get JWT token
+
+### Protected Endpoints (Requires JWT Token)
+
+**GET /entries** - Retrieve user's entries
+**POST /entries** - Create new entry
+
+### Utility Endpoints
+
+**GET /health** - Health check
+**GET /ping** - Connection test
+
+## Quick Start
+
+### Prerequisites
+- Go 1.25.3 or higher
+- Git
+
+### Installation
+
+```bash
+# Clone repository
+git clone https://github.com/absep98/Go_learn.git
+cd Go_learn/Project-Building-While-Learning/personal-analytics-backend
+
+# Install dependencies
+go mod download
+
+# Set environment variables (Windows PowerShell)
+$env:JWT_SECRET = "your-secret-key-here"
+$env:PORT = "8080"
+$env:DB_PATH = "./data.db"
+
+# Or create .env file
+# JWT_SECRET=your-secret-key-here
+# PORT=8080
+# DB_PATH=./data.db
+
+# Run server
+go run .\cmd\server\main.go
 ```
 
-**Response (201 Created):**
-```json
-{
-  "success": true,
-  "message": "Entry created successfully",
-  "id": 1
+Server will start on `http://localhost:8080`
+
+### Running Tests
+
+```powershell
+# Terminal 1: Start server
+go run .\cmd\server\main.go
+
+# Terminal 2: Run all tests
+.\test-all.ps1
+
+# Or run individual test suites
+.\test-register.ps1
+.\test-login.ps1
+.\test-middleware.ps1
+```
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| JWT_SECRET | Yes | - | Secret key for signing JWT tokens |
+| PORT | No | 8080 | Server port |
+| DB_PATH | No | ./data.db | SQLite database file path |
+
+## Usage Examples
+
+### 1. Register a New User
+
+```powershell
+$body = @{
+    email = "user@example.com"
+    password = "password123"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri http://localhost:8080/register -Method Post -Body $body -ContentType "application/json"
+```
+
+### 2. Login and Get Token
+
+```powershell
+$body = @{
+    email = "user@example.com"
+    password = "password123"
+} | ConvertTo-Json
+
+$response = Invoke-RestMethod -Uri http://localhost:8080/login -Method Post -Body $body -ContentType "application/json"
+$token = $response.token
+```
+
+### 3. Create Entry (with token)
+
+```powershell
+$headers = @{
+    "Authorization" = "Bearer $token"
+}
+
+$body = @{
+    text = "Had a great day!"
+    mood = 8
+    category = "personal"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri http://localhost:8080/entries -Method Post -Headers $headers -Body $body -ContentType "application/json"
+```
+
+### 4. Get Entries (with token)
+
+```powershell
+$headers = @{
+    "Authorization" = "Bearer $token"
+}
+
+Invoke-RestMethod -Uri http://localhost:8080/entries -Method Get -Headers $headers
+```
+
+## Project Structure
+
+```
+personal-analytics-backend/
+├── cmd/
+│   └── server/
+│       └── main.go              # Entry point, route registration
+├── internal/
+│   ├── handlers/
+│   │   ├── auth.go              # Register/Login handlers
+│   │   ├── entries.go           # CRUD operations for entries
+│   │   ├── health.go            # Health check
+│   │   ├── middleware.go        # JWT authentication middleware
+│   │   └── loggingMiddleware.go # Request logging
+│   ├── db/
+│   │   └── db.go                # Database layer (SQLite)
+│   └── models/                  # (Future: data models)
+├── learning-demos/
+│   ├── 01-sql-injection-demo.go # Security demo
+│   └── 02-json-struct-tags-practice.go # JSON mapping practice
+├── test-all.ps1                 # Comprehensive test script
+├── test-register.ps1            # Registration tests
+├── test-login.ps1               # Login tests
+├── test-middleware.ps1          # Auth middleware tests
+├── ARCHITECTURE-MAP.md          # Visual architecture guide
+├── CHEAT-SHEET.md               # Quick syntax reference
+├── TESTING.md                   # Test documentation
+├── README.md                    # This file
+├── .env                         # Environment variables (not in git)
+├── data.db                      # SQLite database (not in git)
+└── go.mod                       # Go dependencies
+```
+
+## Database Schema
+
+### users table
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+### entries table
+```sql
+CREATE TABLE entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    mood INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+)
+```
+
+## Testing
+
+**Test Coverage:** 18 comprehensive tests
+- Registration validation (4 tests)
+- Login authentication (4 tests)
+- Middleware protection (3 tests)
+- Entry CRUD operations (4 tests)
+- Data isolation (3 tests)
+
+See [TESTING.md](TESTING.md) for detailed test results.
+
+**All tests passing ✅**
+
+## What I Learned
+
+### Week 1
+- Go HTTP server fundamentals
+- Database design and SQLite integration
+- JSON struct tags and API design
+- SQL injection prevention (parameterized queries)
+- Input validation patterns
+- Error handling best practices
+
+### Week 2
+- JWT token generation and verification
+- bcrypt password hashing
+- Middleware pattern for authentication
+- Context for passing data between middleware and handlers
+- User data isolation
+- Comprehensive testing strategies
+- Better error messages for debugging
+
+## Next Steps (Week 3)
+
+- Implement UPDATE and DELETE operations
+- Add pagination for GET /entries
+- Caching layer for improved performance
+- Rate limiting
+- Background job processing (async)
+- Metrics and monitoring
+
+## Why This Matters for Interviews
+
+This project demonstrates:
+- ✅ **Authentication systems** - JWT, bcrypt, middleware
+- ✅ **Security awareness** - SQL injection prevention, password hashing
+- ✅ **API design** - RESTful endpoints, proper status codes
+- ✅ **Database design** - Schema, relationships, queries
+- ✅ **Testing** - Comprehensive test coverage
+- ✅ **Clean architecture** - Separation of concerns, middleware pattern
+- ✅ **Production readiness** - Logging, error handling, validation
+
+## Resources
+
+- [ARCHITECTURE-MAP.md](ARCHITECTURE-MAP.md) - Visual guide to how everything connects
+- [CHEAT-SHEET.md](CHEAT-SHEET.md) - Quick reference for common patterns
+- [API-ENDPOINTS.md](API-ENDPOINTS.md) - Detailed endpoint documentation
+- [TESTING.md](TESTING.md) - Test results and coverage
+- [Week1-Review.md](Week1-Review.md) - Week 1 learning reflection
+
+## License
+
+This is a learning project. Feel free to use as reference!
+
+## Contact
+
+GitHub: [@absep98](https://github.com/absep98)
+
 }
 ```
 
