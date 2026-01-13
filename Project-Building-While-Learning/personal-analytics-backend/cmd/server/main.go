@@ -77,6 +77,9 @@ func main() {
 				handlers.CreateEntry(w, r)
 			} else if r.Method == http.MethodGet {
 				handlers.GetEntries(w, r)
+			} else if r.Method == http.MethodPatch {
+				// PATCH /entries?id=5 - Update an entry
+				handlers.UpdateEntry(w, r)
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"personal-analytics-backend/internal/db"
+	"strconv"
 )
 
 // CreateEntryRequest represents the incoming request body
@@ -184,4 +185,75 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	// Covert our go struct to json and send it to client
 	json.NewEncoder(w).Encode(data)
+}
+
+func UpdateEntry(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	entryId, err := strconv.Atoi(r.URL.Query().Get("id"))
+	if err != nil {
+		log.Printf("❌ Invalid entry ID: %v", err)
+		errorResponse(w, http.StatusBadRequest, "Invalid or missing entry ID")
+		return
+	}
+
+	userIDValue := r.Context().Value("user_id")
+	if userIDValue == nil {
+		errorResponse(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
+	userID, ok := userIDValue.(int64)
+	if !ok {
+		errorResponse(w, http.StatusInternalServerError, "Invalid authentication data")
+		return
+	}
+	log.Printf("🔍 Updating entry for user ID: %d", userID)
+
+	var req CreateEntryRequest
+	err = json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.Text == "" {
+		errorResponse(w, http.StatusBadRequest, "text cannot be empty")
+		return
+	}
+
+	if req.Mood < 1 || req.Mood > 10 {
+		errorResponse(w, http.StatusBadRequest, "mood must be between 1 and 10")
+		return
+	}
+
+	if req.Category == "" {
+		errorResponse(w, http.StatusBadRequest, "category cannot be empty")
+		return
+	}
+
+	// Call database to update entry
+	rowsAffected, err := db.UpdateEntry(entryId, userID, req.Text, req.Mood, req.Category)
+	if err != nil {
+		log.Printf("❌ Database error: %v", err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to update entry")
+		return
+	}
+
+	// If no rows affected, entry doesn't exist or doesn't belong to user
+	if rowsAffected == 0 {
+		errorResponse(w, http.StatusNotFound, "Entry not found or access denied")
+		return
+	}
+
+	// Success response
+	log.Printf("✅ Entry %d updated successfully for user %d", entryId, userID)
+	respondJSON(w, http.StatusOK, CreateEntryResponse{
+		Success: true,
+		Message: "Entry updated successfully",
+	})
 }

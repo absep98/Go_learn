@@ -159,8 +159,8 @@ func GetAllEntries() ([]map[string]interface{}, error) {
 // GetEntriesByUser retrieves all entries for a specific user
 // Used when user is authenticated - only show their own entries
 func GetEntriesByUser(userID int64) ([]map[string]interface{}, error) {
-	query := `SELECT id, user_id, text, mood, category, created_at 
-	          FROM entries 
+	query := `SELECT id, user_id, text, mood, category, created_at
+	          FROM entries
 	          WHERE user_id = ?
 	          ORDER BY created_at DESC`
 
@@ -230,6 +230,28 @@ func GetUserByEmail(email string) (int64, string, error) {
 	}
 
 	return userID, passwordHash, nil
+}
+
+// Update Entry
+// Updates an entry only if it belongs to the authenticated user
+func UpdateEntry(entryId int, userID int64, text string, mood int, category string) (int64, error) {
+
+	query := `UPDATE entries SET text = ?, mood = ?, category = ? WHERE id = ? AND user_id = ?`
+
+	// Parameters must match placeholder order: text, mood, category, id, user_id
+	result, err := DB.Exec(query, text, mood, category, entryId, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Check if any row was actually updated
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	// Returns 0 if entry not found OR doesn't belong to user
+	return rowsAffected, nil
 }
 
 // CloseDB closes the database connection
