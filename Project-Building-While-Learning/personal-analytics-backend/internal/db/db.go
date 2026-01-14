@@ -111,6 +111,37 @@ func InsertEntry(userID int, text string, mood int, category string) (int64, err
 	return id, nil
 }
 
+// GetEntryById retrieves the entry from database for a particular ID
+func GetEntryByID(entryID int, userId int64) (map[string]interface{}, error) {
+
+	query := `SELECT id, user_id, text, mood, category, created_at
+				FROM entries
+				WHERE id = ? and user_id = ?
+			`
+
+	row := DB.QueryRow(query, entryID, userId)
+
+	var id, userIDResult int64
+	var text, category, created_at string
+	var mood int
+
+	err := row.Scan(&id, &userIDResult, &text, &mood, &category, &created_at)
+	if err != nil {
+		return nil, err
+	}
+
+	entry := map[string]interface{}{
+		"id":         id,
+		"user_id":    userIDResult,
+		"text":       text,
+		"mood":       mood,
+		"category":   category,
+		"created_at": created_at,
+	}
+
+	return entry, nil
+}
+
 // GetAllEntries retrieves all entries from the database
 // string = field name (like "id", "text", "mood")
 // interface{} = any type of value (number, text, etc.)
