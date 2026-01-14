@@ -228,6 +228,54 @@ func GetEntriesByUser(userID int64) ([]map[string]interface{}, error) {
 	return entries, nil
 }
 
+// GetEntriesByUserPaginated allow users to paginate through entries instead of getting all at once.
+func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []map[string]interface{}, total int) {
+
+	queryForCount := `SELECT COUNT(*) FROM entries WHERE user_id = ?`
+
+	err := DB.QueryRow(queryForCount, userId).Scan(&total)
+
+	if err != nil {
+		return nil, 0
+	}
+
+	queryForEntries := `SELECT id, user_id, text, mood, category, created_at
+	 FROM entries WHERE
+	 user_id = ?
+	 ORDER BY created_at DESC
+	 LIMIT ? OFFset ?
+	 `
+	rows, err := DB.Query(queryForEntries, userId, limit, (page-1)*limit)
+
+	if err != nil {
+		return nil, 0
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, userIDResult int64
+		var text, category, created_at string
+		var mood int
+
+		err := rows.Scan(&id, &userIDResult, &text, &mood, &category, &created_at)
+		if err != nil {
+			return nil, 0
+		}
+
+		entry := map[string]interface{}{
+			"id":         id,
+			"user_id":    userId,
+			"text":       text,
+			"mood":       mood,
+			"category":   category,
+			"created_at": created_at,
+		}
+		entries = append(entries, entry)
+	}
+	return entries, total
+}
+
 // CreateUser inserts a new user into the database
 // Takes email and hashed password (NOT plain password!)
 func CreateUser(email string, passwordHash string) (int64, error) {

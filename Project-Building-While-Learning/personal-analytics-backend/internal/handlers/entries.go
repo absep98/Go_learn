@@ -119,6 +119,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 
 // GetEntries handles GET /entries
 // Returns entries for the authenticated user only
+// Supports pagination: ?page=1&limit=10
 func GetEntries(w http.ResponseWriter, r *http.Request) {
 	log.Println("📚 GET /entries - Request received")
 
@@ -126,6 +127,25 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	// Parse pagination params with defaults
+	// If not provided or invalid, use defaults instead of returning error
+	page := 1  // Default page
+	limit := 10 // Default limit
+
+	pageStr := r.URL.Query().Get("page")
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
 	}
 
 	// Get authenticated user_id from context (middleware puts it there)
@@ -149,30 +169,31 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("🔍 Fetching entries for user ID: %d", userID)
+	log.Printf("🔍 Fetching entries for user ID: %d (page=%d, limit=%d)", userID, page, limit)
 
 	// Get entries for this user only
-	entries, err := db.GetEntriesByUser(userID)
-	if err != nil {
-		log.Printf("❌ Database error: %v", err)
-		respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false,
-			"message": "Failed to fetch entries",
-		})
-		return
-	}
+	// Note: int(userID) converts int64 to int to match function signature
+	entries, total := db.GetEntriesByUserPaginated(int(userID), page, limit)
 
 	// Handle empty case - return empty array instead of null
 	if entries == nil {
 		entries = []map[string]interface{}{}
 	}
 
-	// Success response with entries
-	log.Printf("✅ Returning %d entries for user %d", len(entries), userID)
+	// Calculate total pages using integer ceiling division
+	// Formula: (total + limit - 1) / limit
+	// Example: 25 total, limit 10 → (25 + 10 - 1) / 10 = 34 / 10 = 3 pages
+	totalPages := (total + limit - 1) / limit
+
+	// Success response with entries and pagination metadata
+	log.Printf("✅ Returning %d entries for user %d (page %d of %d)", len(entries), userID, page, totalPages)
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"count":   len(entries),
-		"entries": entries,
+		"success":    true,
+		"entries":    entries,
+		"page":       page,
+		"limit":      limit,
+		"total":      total,
+		"totalPages": totalPages,
 	})
 }
 
