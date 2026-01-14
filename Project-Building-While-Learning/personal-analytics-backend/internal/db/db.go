@@ -254,6 +254,22 @@ func UpdateEntry(entryId int, userID int64, text string, mood int, category stri
 	return rowsAffected, nil
 }
 
+func DeleteEntry(entryId int, userID int64) (int64, error) {
+
+	query := `DELETE FROM ENTRIES WHERE id = ? and user_id = ?`
+
+	result, err := DB.Exec(query, entryId, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	rowAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return rowAffected, nil
+}
+
 // CloseDB closes the database connection
 func CloseDB() {
 	// Why Close DB Connection When Server Closes?

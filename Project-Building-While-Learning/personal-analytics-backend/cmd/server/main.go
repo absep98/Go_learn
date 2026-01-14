@@ -80,6 +80,9 @@ func main() {
 			} else if r.Method == http.MethodPatch {
 				// PATCH /entries?id=5 - Update an entry
 				handlers.UpdateEntry(w, r)
+			} else if r.Method == http.MethodDelete {
+				// Delete /entries?id=5 - Delete an entry
+				handlers.DeleteEntry(w, r)
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}

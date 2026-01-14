@@ -1,9 +1,9 @@
-# Test UPDATE Endpoint (PATCH /entries?id=X)
-# Day 14 - Week 3
-# Tests: Update own entry, non-existent entry, without token, invalid data
+# Test DELETE Endpoint (DELETE /entries?id=X)
+# Day 15 - Week 3
+# Tests: Delete own entry, verify deleted, non-existent entry, without token, invalid ID
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  UPDATE ENDPOINT TESTS (PATCH /entries)" -ForegroundColor Cyan
+Write-Host "  DELETE ENDPOINT TESTS (DELETE /entries)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -92,41 +92,32 @@ catch {
 $authHeaders = @{ Authorization = "Bearer $token" }
 
 # ============================================
-# SETUP: Create a test entry to update
+# SETUP: Create a test entry to delete
 # ============================================
-Write-Host "SETUP: Creating test entry to update..." -ForegroundColor Magenta
+Write-Host "SETUP: Creating test entry to delete..." -ForegroundColor Magenta
 
 try {
-    $createResponse = Invoke-RestMethod -Uri "$baseUrl/entries" -Method POST -Headers $authHeaders -Body '{"text":"Original text for update test","mood":5,"category":"test"}' -ContentType "application/json"
+    $createResponse = Invoke-RestMethod -Uri "$baseUrl/entries" -Method POST -Headers $authHeaders -Body '{"text":"Entry to be deleted","mood":5,"category":"delete-test"}' -ContentType "application/json"
     $testEntryId = $createResponse.id
     Write-Host "  Created entry with ID: $testEntryId" -ForegroundColor Green
     Write-Host ""
 }
 catch {
-    # Entry might already exist, get the first one
-    $entries = Invoke-RestMethod -Uri "$baseUrl/entries" -Method GET -Headers $authHeaders
-    if ($entries.entries.Count -gt 0) {
-        $testEntryId = $entries.entries[0].id
-        Write-Host "  Using existing entry with ID: $testEntryId" -ForegroundColor Yellow
-        Write-Host ""
-    }
-    else {
-        Write-Host "  FAILED to create or find test entry!" -ForegroundColor Red
-        exit 1
-    }
+    Write-Host "  FAILED to create test entry!" -ForegroundColor Red
+    Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 }
 
 # ============================================
-# TEST 1: Update own entry (should succeed)
+# TEST 1: Delete own entry (should succeed)
 # ============================================
 Write-Host ""
-if (Test-Endpoint -Name "Update own entry with valid data" `
-        -Method "PATCH" `
+if (Test-Endpoint -Name "Delete own entry" `
+        -Method "DELETE" `
         -Url "$baseUrl/entries?id=$testEntryId" `
         -Headers $authHeaders `
-        -Body '{"text":"Updated text!","mood":8,"category":"updated"}' `
         -ExpectedStatus 200 `
-        -ExpectedMessage "Entry updated successfully") {
+        -ExpectedMessage "Entry deleted successfully") {
     $testsPassed++
 }
 else {
@@ -134,39 +125,37 @@ else {
 }
 
 # ============================================
-# TEST 2: Verify entry was actually updated
+# TEST 2: Verify entry was actually deleted
 # ============================================
 Write-Host ""
-Write-Host "TEST: Verify entry was actually updated" -ForegroundColor Yellow
+Write-Host "TEST: Verify entry was actually deleted" -ForegroundColor Yellow
 try {
     $entries = Invoke-RestMethod -Uri "$baseUrl/entries" -Method GET -Headers $authHeaders
-    $updatedEntry = $entries.entries | Where-Object { $_.id -eq $testEntryId }
+    $deletedEntry = $entries.entries | Where-Object { $_.id -eq $testEntryId }
 
-    if ($updatedEntry.text -eq "Updated text!" -and $updatedEntry.mood -eq 8 -and $updatedEntry.category -eq "updated") {
-        Write-Host "  Entry values verified: text='$($updatedEntry.text)', mood=$($updatedEntry.mood), category='$($updatedEntry.category)'" -ForegroundColor Gray
+    if ($null -eq $deletedEntry) {
+        Write-Host "  Entry ID $testEntryId no longer exists in database" -ForegroundColor Gray
         Write-Host "  PASSED" -ForegroundColor Green
         $testsPassed++
     }
     else {
-        Write-Host "  FAILED: Entry values not updated correctly" -ForegroundColor Red
-        Write-Host "  Got: text='$($updatedEntry.text)', mood=$($updatedEntry.mood), category='$($updatedEntry.category)'" -ForegroundColor Red
+        Write-Host "  FAILED: Entry still exists!" -ForegroundColor Red
         $testsFailed++
     }
 }
 catch {
-    Write-Host "  FAILED: Could not verify entry" -ForegroundColor Red
+    Write-Host "  FAILED: Could not verify deletion" -ForegroundColor Red
     $testsFailed++
 }
 
 # ============================================
-# TEST 3: Update non-existent entry (404)
+# TEST 3: Delete already deleted entry (404)
 # ============================================
 Write-Host ""
-if (Test-Endpoint -Name "Update non-existent entry (ID 99999)" `
-        -Method "PATCH" `
-        -Url "$baseUrl/entries?id=99999" `
+if (Test-Endpoint -Name "Delete already deleted entry (should be 404)" `
+        -Method "DELETE" `
+        -Url "$baseUrl/entries?id=$testEntryId" `
         -Headers $authHeaders `
-        -Body '{"text":"Test","mood":5,"category":"test"}' `
         -ExpectedStatus 404) {
     $testsPassed++
 }
@@ -175,13 +164,27 @@ else {
 }
 
 # ============================================
-# TEST 4: Update without auth token (401)
+# TEST 4: Delete non-existent entry (404)
 # ============================================
 Write-Host ""
-if (Test-Endpoint -Name "Update without authentication" `
-        -Method "PATCH" `
-        -Url "$baseUrl/entries?id=$testEntryId" `
-        -Body '{"text":"No auth","mood":5,"category":"test"}' `
+if (Test-Endpoint -Name "Delete non-existent entry (ID 99999)" `
+        -Method "DELETE" `
+        -Url "$baseUrl/entries?id=99999" `
+        -Headers $authHeaders `
+        -ExpectedStatus 404) {
+    $testsPassed++
+}
+else {
+    $testsFailed++
+}
+
+# ============================================
+# TEST 5: Delete without auth token (401)
+# ============================================
+Write-Host ""
+if (Test-Endpoint -Name "Delete without authentication" `
+        -Method "DELETE" `
+        -Url "$baseUrl/entries?id=1" `
         -ExpectedStatus 401) {
     $testsPassed++
 }
@@ -190,46 +193,13 @@ else {
 }
 
 # ============================================
-# TEST 5: Update with invalid mood (400)
+# TEST 6: Delete with missing ID (400)
 # ============================================
 Write-Host ""
-if (Test-Endpoint -Name "Update with invalid mood (mood=15)" `
-        -Method "PATCH" `
-        -Url "$baseUrl/entries?id=$testEntryId" `
-        -Headers $authHeaders `
-        -Body '{"text":"Test","mood":15,"category":"test"}' `
-        -ExpectedStatus 400) {
-    $testsPassed++
-}
-else {
-    $testsFailed++
-}
-
-# ============================================
-# TEST 6: Update with empty text (400)
-# ============================================
-Write-Host ""
-if (Test-Endpoint -Name "Update with empty text" `
-        -Method "PATCH" `
-        -Url "$baseUrl/entries?id=$testEntryId" `
-        -Headers $authHeaders `
-        -Body '{"text":"","mood":5,"category":"test"}' `
-        -ExpectedStatus 400) {
-    $testsPassed++
-}
-else {
-    $testsFailed++
-}
-
-# ============================================
-# TEST 7: Update with missing ID (400)
-# ============================================
-Write-Host ""
-if (Test-Endpoint -Name "Update with missing entry ID" `
-        -Method "PATCH" `
+if (Test-Endpoint -Name "Delete with missing entry ID" `
+        -Method "DELETE" `
         -Url "$baseUrl/entries" `
         -Headers $authHeaders `
-        -Body '{"text":"Test","mood":5,"category":"test"}' `
         -ExpectedStatus 400) {
     $testsPassed++
 }
@@ -238,14 +208,13 @@ else {
 }
 
 # ============================================
-# TEST 8: Update with invalid ID format (400)
+# TEST 7: Delete with invalid ID format (400)
 # ============================================
 Write-Host ""
-if (Test-Endpoint -Name "Update with invalid ID format (id=abc)" `
-        -Method "PATCH" `
+if (Test-Endpoint -Name "Delete with invalid ID format (id=abc)" `
+        -Method "DELETE" `
         -Url "$baseUrl/entries?id=abc" `
         -Headers $authHeaders `
-        -Body '{"text":"Test","mood":5,"category":"test"}' `
         -ExpectedStatus 400) {
     $testsPassed++
 }

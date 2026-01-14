@@ -257,3 +257,52 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		Message: "Entry updated successfully",
 	})
 }
+
+func DeleteEntry(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	entryId, err := strconv.Atoi(r.URL.Query().Get("id"))
+	if err != nil {
+		log.Printf("Invalid entry ID : %v", err)
+		errorResponse(w, http.StatusBadRequest, "Invalid or missing entry ID")
+		return
+	}
+
+	userIDValue := r.Context().Value("user_id")
+	if userIDValue == nil {
+		errorResponse(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
+	userID, ok := userIDValue.(int64)
+	if !ok {
+		errorResponse(w, http.StatusInternalServerError, "Invalid authenticaiton data")
+		return
+	}
+
+	log.Printf("Deleting entry for user ID %d", userID)
+
+	rowsAffected, err := db.DeleteEntry(entryId, userID)
+
+	if err != nil {
+		log.Printf("Database error : %v", err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to delete entry")
+		return
+	}
+
+	if rowsAffected == 0 {
+		errorResponse(w, http.StatusNotFound, "Entry not found or access denied")
+		return
+	}
+
+	log.Printf("Entry %d deleted successfully for user %d", entryId, userID)
+	respondJSON(w, http.StatusOK, CreateEntryResponse{
+		Success: true,
+		Message: "Entry deleted successfully",
+	})
+
+}
