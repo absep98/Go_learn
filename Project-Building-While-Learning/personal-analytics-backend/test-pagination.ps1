@@ -16,7 +16,8 @@ try {
     $loginResponse = Invoke-RestMethod -Uri "$baseUrl/login" -Method POST -Body $loginBody -ContentType "application/json"
     $token = $loginResponse.token
     Write-Host "[OK] Login successful" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "[FAIL] Login failed: $_" -ForegroundColor Red
     exit 1
 }
@@ -30,11 +31,13 @@ try {
     if ($response.success -eq $true -and $response.page -eq 1 -and $response.limit -eq 10) {
         Write-Host "[PASS] Defaults applied: page=$($response.page), limit=$($response.limit)" -ForegroundColor Green
         $testsPassed++
-    } else {
+    }
+    else {
         Write-Host "[FAIL] Unexpected defaults" -ForegroundColor Red
         $testsFailed++
     }
-} catch {
+}
+catch {
     Write-Host "[FAIL] $_" -ForegroundColor Red
     $testsFailed++
 }
@@ -47,11 +50,13 @@ try {
         $entriesCount = @($response.entries).Count
         Write-Host "[PASS] Returned $entriesCount entry, totalPages=$($response.totalPages)" -ForegroundColor Green
         $testsPassed++
-    } else {
+    }
+    else {
         Write-Host "[FAIL] Pagination params not applied" -ForegroundColor Red
         $testsFailed++
     }
-} catch {
+}
+catch {
     Write-Host "[FAIL] $_" -ForegroundColor Red
     $testsFailed++
 }
@@ -61,24 +66,27 @@ Write-Host "`n[Test 3] Page 2 (page=2, limit=1)" -ForegroundColor Yellow
 try {
     $page1 = Invoke-RestMethod -Uri "$baseUrl/entries?page=1&limit=1" -Method GET -Headers $headers
     $page2 = Invoke-RestMethod -Uri "$baseUrl/entries?page=2&limit=1" -Method GET -Headers $headers
-    
+
     if ($response.success -eq $true -and $page2.page -eq 2) {
         # Check if entries are different (offset worked)
         $id1 = if ($page1.entries.Count -gt 0) { $page1.entries[0].id } else { -1 }
         $id2 = if ($page2.entries.Count -gt 0) { $page2.entries[0].id } else { -2 }
-        
+
         if ($id1 -ne $id2) {
             Write-Host "[PASS] Different entries on page 2 (offset working)" -ForegroundColor Green
             $testsPassed++
-        } else {
+        }
+        else {
             Write-Host "[WARN] Same or no entries - might be expected if only 1 entry exists" -ForegroundColor Yellow
             $testsPassed++
         }
-    } else {
+    }
+    else {
         Write-Host "[FAIL] Page 2 not working" -ForegroundColor Red
         $testsFailed++
     }
-} catch {
+}
+catch {
     Write-Host "[FAIL] $_" -ForegroundColor Red
     $testsFailed++
 }
@@ -91,11 +99,13 @@ try {
     if ($response.success -eq $true -and $entriesCount -eq 0) {
         Write-Host "[PASS] Returns empty array for page beyond data" -ForegroundColor Green
         $testsPassed++
-    } else {
+    }
+    else {
         Write-Host "[FAIL] Should return empty entries" -ForegroundColor Red
         $testsFailed++
     }
-} catch {
+}
+catch {
     Write-Host "[FAIL] $_" -ForegroundColor Red
     $testsFailed++
 }
@@ -107,11 +117,13 @@ try {
     if ($response.success -eq $true -and $response.page -eq 1 -and $response.limit -eq 10) {
         Write-Host "[PASS] Invalid params use defaults" -ForegroundColor Green
         $testsPassed++
-    } else {
+    }
+    else {
         Write-Host "[FAIL] Should fallback to defaults" -ForegroundColor Red
         $testsFailed++
     }
-} catch {
+}
+catch {
     Write-Host "[FAIL] $_" -ForegroundColor Red
     $testsFailed++
 }
@@ -124,15 +136,17 @@ try {
     $hasLimit = $null -ne $response.limit
     $hasTotal = $null -ne $response.total
     $hasTotalPages = $null -ne $response.totalPages
-    
+
     if ($hasPage -and $hasLimit -and $hasTotal -and $hasTotalPages) {
         Write-Host "[PASS] All pagination fields present (page, limit, total, totalPages)" -ForegroundColor Green
         $testsPassed++
-    } else {
+    }
+    else {
         Write-Host "[FAIL] Missing pagination fields" -ForegroundColor Red
         $testsFailed++
     }
-} catch {
+}
+catch {
     Write-Host "[FAIL] $_" -ForegroundColor Red
     $testsFailed++
 }
