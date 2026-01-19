@@ -136,7 +136,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	// Parse pagination params with defaults
 	// If not provided or invalid, use defaults instead of returning error
-	page := 1  // Default page
+	page := 1   // Default page
 	limit := 10 // Default limit
 
 	pageStr := r.URL.Query().Get("page")
@@ -275,6 +275,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusNotFound, "Entry not found or access denied")
 		return
 	}
+	cache.AppCache.Delete(fmt.Sprintf("count:user:%d", userID))
 
 	// Success response
 	log.Printf("✅ Entry %d updated successfully for user %d", entryId, userID)
@@ -325,9 +326,7 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Invalidate count cache for this user
 	cache.AppCache.Delete(fmt.Sprintf("count:user:%d", userID))
-
 	log.Printf("Entry %d deleted successfully for user %d", entryId, userID)
 	respondJSON(w, http.StatusOK, CreateEntryResponse{
 		Success: true,
