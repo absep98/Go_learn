@@ -226,6 +226,7 @@ func InitDB() (*sql.DB, error) {
 > You're not "connecting to a database" - you're "creating a connection manager."
 
 ---
+
 ### 🔬 Going Deeper: What Exactly Gets Skipped?
 
 It's not just about skipping authentication - it's about skipping the **entire handshake process**.
@@ -239,7 +240,7 @@ Step 1: 🌐 Network Handshake
         → Computer says "Hello" to database (opens a socket)
         → Takes: 1-5ms
 
-Step 2: 🔒 TLS/SSL Handshake  
+Step 2: 🔒 TLS/SSL Handshake
         → Agree on encryption so nobody can spy
         → Takes: 10-30ms
 
@@ -289,10 +290,10 @@ Step 4: 🧵 Resource Allocation
 ```
 ❌ No Pooling:
    → Build a new bridge
-   → Cross it once  
+   → Cross it once
    → Blow up the bridge
    → Repeat 10,000 times
-   
+
 ✅ With Pooling:
    → Build 50 permanent bridges
    → Everyone takes turns crossing them
@@ -400,6 +401,7 @@ Think of your system like a bank:
 Since your Go App has a "Master Key" to the database, the danger isn't the connection—it's **what you tell the database to do**.
 
 **The Attack:**
+
 ```go
 // ❌ DANGEROUS - User input directly in query
 userInput := "1; DROP TABLE users; --"
@@ -408,6 +410,7 @@ db.Query(query)  // Deletes your users table!
 ```
 
 **The Fix:**
+
 ```go
 // ✅ SAFE - Parameterized query
 userInput := "1; DROP TABLE users; --"
@@ -420,7 +423,7 @@ db.Query("SELECT * FROM books WHERE id = ?", userInput)
 #### 🎯 Summary
 
 > **Pooling skips the login between Your Server ↔ Database**
-> 
+>
 > **But your server still checks every user's ID before letting them use that "open door"**
 
 ```

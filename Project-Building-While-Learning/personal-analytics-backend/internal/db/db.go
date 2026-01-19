@@ -2,7 +2,10 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
+	"personal-analytics-backend/internal/cache"
+	"time"
 
 	// The underscore _ means "blank import"
 	// // You DON'T call any functions from it
@@ -231,12 +234,23 @@ func GetEntriesByUser(userID int64) ([]map[string]interface{}, error) {
 // GetEntriesByUserPaginated allow users to paginate through entries instead of getting all at once.
 func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []map[string]interface{}, total int) {
 
-	queryForCount := `SELECT COUNT(*) FROM entries WHERE user_id = ?`
+	// 1. Build cache key
+	cacheKey := fmt.Sprintf("count:user:%d", userId)
 
-	err := DB.QueryRow(queryForCount, userId).Scan(&total)
+	// 2. Try to get from cache
+	if cachedCount, found := cache.AppCache.Get(cacheKey); found {
+		total = cachedCount.(int) // Type assertion: interface{} -> int
+	} else {
+		// 3. Cache miss: query database
+		queryForCount := `SELECT COUNT(*) FROM entries WHERE user_id = ?`
+		err := DB.QueryRow(queryForCount, userId).Scan(&total)
 
-	if err != nil {
-		return nil, 0
+		if err != nil {
+			return nil, 0
+		}
+
+		// 4. Store in cache for 60 seconds
+		cache.AppCache.Set(cacheKey, total, 60*time.Second)
 	}
 
 	queryForEntries := `SELECT id, user_id, text, mood, category, created_at
