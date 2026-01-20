@@ -1,5 +1,21 @@
 package handlers
 
+/*
+Rate Limiting Middleware - Fixed Window Algorithm
+
+How it works:
+- Track request count per IP address in a time window
+- If count exceeds limit → return 429 Too Many Requests
+- Window resets after expiration (e.g., 1 minute)
+
+Limitations of in-memory approach:
+1. Multiple servers: Each has separate counts (user can bypass: limit × servers)
+2. Server restart: All counts reset to 0 (data lost)
+
+Production solution: Use Redis for centralized, persistent rate limiting
+See: System design Questions/Day18-Rate-Limiting.md for details
+*/
+
 import (
 	"net/http"
 	"sync"
