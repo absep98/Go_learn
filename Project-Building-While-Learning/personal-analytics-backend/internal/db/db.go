@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"personal-analytics-backend/internal/cache"
+	"strconv"
 	"time"
 
 	// The underscore _ means "blank import"
@@ -238,8 +239,8 @@ func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []map[s
 	cacheKey := fmt.Sprintf("count:user:%d", userId)
 
 	// 2. Try to get from cache
-	if cachedCount, found := cache.AppCache.Get(cacheKey); found {
-		total = cachedCount.(int) // Type assertion: interface{} -> int
+	if cachedCount, found := cache.Get(cacheKey); found {
+		total, _ = strconv.Atoi(cachedCount) // Convert string to int (Redis stores strings)
 	} else {
 		// 3. Cache miss: query database
 		queryForCount := `SELECT COUNT(*) FROM entries WHERE user_id = ?`
@@ -250,7 +251,7 @@ func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []map[s
 		}
 
 		// 4. Store in cache for 60 seconds
-		cache.AppCache.Set(cacheKey, total, 60*time.Second)
+		cache.Set(cacheKey, total, 60*time.Second)
 	}
 
 	queryForEntries := `SELECT id, user_id, text, mood, category, created_at

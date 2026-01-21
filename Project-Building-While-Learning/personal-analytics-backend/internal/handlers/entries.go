@@ -110,7 +110,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cache.AppCache.Delete(fmt.Sprintf("count:user:%d", userID))
+	cache.Delete(fmt.Sprintf("count:user:%d", userID))
 
 	// All above are checks if passed then only allow to save it
 	// Success response
@@ -275,7 +275,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusNotFound, "Entry not found or access denied")
 		return
 	}
-	cache.AppCache.Delete(fmt.Sprintf("count:user:%d", userID))
+	cache.Delete(fmt.Sprintf("count:user:%d", userID))
 
 	// Success response
 	log.Printf("✅ Entry %d updated successfully for user %d", entryId, userID)
@@ -326,7 +326,7 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cache.AppCache.Delete(fmt.Sprintf("count:user:%d", userID))
+	cache.Delete(fmt.Sprintf("count:user:%d", userID))
 	log.Printf("Entry %d deleted successfully for user %d", entryId, userID)
 	respondJSON(w, http.StatusOK, CreateEntryResponse{
 		Success: true,

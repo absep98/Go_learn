@@ -1,63 +1,40 @@
 package cache
 
 import (
-	"sync"
+	"context"
 	"time"
+
+	"personal-analytics-backend/internal/redis" // Your redis package with Client
+
+	goredis "github.com/redis/go-redis/v9" // For goredis.Nil error check
 )
 
-type CacheEntry struct {
-	value      interface{}
-	Expiration time.Time
-}
+// Get retrieves a value from Redis
+// Returns (value, true) if found, ("", false) if not found or error
+func Get(key string) (string, bool) {
+	// redis.Client = your connection to Redis (from internal/redis/redis.go)
+	// context.Background() = empty context (no timeout/cancellation)
+	// .Result() = execute command and get (value, error)
+	result, err := redis.Client.Get(context.Background(), key).Result()
 
-type Cache struct {
-	data map[string]CacheEntry
-	mu   sync.RWMutex
-}
-
-func NewCache() *Cache {
-	return &Cache{
-		data: make(map[string]CacheEntry),
+	// goredis.Nil = special error meaning "key doesn't exist"
+	if err == goredis.Nil {
+		return "", false // Not found
 	}
-}
-
-func (c *Cache) Get(key string) (interface{}, bool) {
-
-	c.mu.RLock()         // Lock for reading
-	defer c.mu.RUnlock() // Unlock when function ends
-
-	entry, exists := c.data[key]
-	if !exists {
-		return nil, false
+	if err != nil {
+		return "", false // Some other error
 	}
-
-	// check if expired
-	if time.Now().After(entry.Expiration) {
-		return nil, false // Expiration = not found
-	}
-
-	return entry.value, true
-
+	return result, true // Found!
 }
 
-func (c *Cache) Set(key string, value interface{}, ttl time.Duration) {
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	expiration_time := time.Now().Add(ttl)
-
-	c.data[key] = CacheEntry{
-		value:      value,
-		Expiration: expiration_time,
-	}
+// Set stores a value in Redis with TTL (auto-expires)
+func Set(key string, value interface{}, ttl time.Duration) {
+	// Redis Set automatically handles expiration via ttl parameter
+	redis.Client.Set(context.Background(), key, value, ttl)
 }
 
-func (c *Cache) Delete(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	delete(c.data, key)
+// Delete removes a key from Redis
+func Delete(key string) {
+	// Del = delete command in Redis
+	redis.Client.Del(context.Background(), key)
 }
-
-var AppCache = NewCache()

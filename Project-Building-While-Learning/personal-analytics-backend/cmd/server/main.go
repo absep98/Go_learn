@@ -6,6 +6,7 @@ import (
 	"os"
 	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/handlers"
+	"personal-analytics-backend/internal/redis"
 
 	"github.com/joho/godotenv"
 )
@@ -47,6 +48,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
+
+	err = redis.InitRedis("localhost:6379")
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	defer redis.CloseRedis()
+
 	// The "Defer" Magic: defer is a Go keyword that says: "Wait until this entire function (main) is finished, then immediately run this command."
 	defer db.CloseDB()
 
