@@ -1,12 +1,15 @@
 # Day 18: Rate Limiting - System Design
 
 ## What We Built
+
 In-memory rate limiter using sliding window approach:
+
 - Track request count per IP address
 - Reset count when time window expires
 - Return 429 Too Many Requests when limit exceeded
 
 ## The Algorithm (Fixed Window)
+
 ```
 Request comes in:
 1. Get user's entry from map
@@ -19,24 +22,27 @@ Request comes in:
 
 ## Problem 1: Multiple Servers (Split Brain)
 
-### The Issue:
+### The Issue
+
 ```
                     Load Balancer
                     /           \
                 Server A         Server B
                 count: 50        count: 50
-                
+
 User makes 100 requests → 50 go to A, 50 go to B
 Each server thinks: "Only 50 requests, under limit!"
 Reality: User made 100 requests but wasn't blocked! ❌
 ```
 
-### Why It Happens:
+### Why It Happens
+
 - Each server has its **own local memory**
 - Rate limit data is **not shared** between servers
 - User can bypass limit by: `limit × number_of_servers`
 
 ### Solution: Centralized Storage (Redis)
+
 ```go
 // Instead of local map:
 count := redis.INCR("ratelimit:user:123")
@@ -48,7 +54,8 @@ if count > 100 { block }
 
 ## Problem 2: Server Restart (Data Loss)
 
-### The Issue:
+### The Issue
+
 ```
 Before restart:  count: 99 (almost at limit!)
 Server crashes or restarts...
@@ -57,12 +64,14 @@ After restart:   count: 0  (fresh start)
 User continues without any limit! ❌
 ```
 
-### Why It Happens:
+### Why It Happens
+
 - In-memory data lives only while process runs
 - Restart = all data gone
 - No persistence
 
 ### Solution: External Storage
+
 - Redis persists data outside the application
 - Data survives application restarts
 - Can even configure Redis persistence to disk
@@ -84,21 +93,25 @@ User continues without any limit! ❌
 ## Rate Limiting Algorithms
 
 ### 1. Fixed Window (What we built)
+
 - Count requests in fixed time windows (e.g., 0:00-1:00, 1:00-2:00)
 - Simple but has edge case: burst at window boundary
 
 ### 2. Sliding Window
+
 - Counts requests in rolling window (last 60 seconds from NOW)
 - Smoother, prevents boundary bursts
 - Slightly more complex
 
 ### 3. Token Bucket
+
 - Bucket holds tokens, refills at steady rate
 - Each request consumes a token
 - Allows bursts (if bucket is full)
 - Used by AWS, Stripe
 
 ### 4. Leaky Bucket
+
 - Requests queue up, processed at constant rate
 - Smooths out traffic
 - Good for consistent processing rate
@@ -109,9 +122,10 @@ User continues without any limit! ❌
 
 **Q: "How would you implement rate limiting for a distributed system?"**
 
-**A:** "For a single server, an in-memory solution with a map and mutex works well. But for distributed systems, we need centralized storage like Redis. 
+**A:** "For a single server, an in-memory solution with a map and mutex works well. But for distributed systems, we need centralized storage like Redis.
 
 Key approach:
+
 1. Use Redis INCR to atomically increment request count
 2. Set TTL for automatic expiration (sliding window)
 3. Check count before processing request
@@ -145,6 +159,7 @@ func RateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc
 ## Why We Migrated
 
 Both **Cache** and **Rate Limiting** had the same problems with in-memory maps:
+
 1. ❌ Data lost on server restart
 2. ❌ Each server has its own copy (can't scale horizontally)
 3. ❌ Memory fills up over time (no automatic cleanup)
@@ -179,7 +194,7 @@ func NewCache() *Cache {
 func (c *Cache) Get(key string) (interface{}, bool) {
     c.mu.RLock()         // Lock for reading
     defer c.mu.RUnlock()
-    
+
     entry, exists := c.data[key]
     if !exists || time.Now().After(entry.Expiration) {
         return nil, false
@@ -190,7 +205,7 @@ func (c *Cache) Get(key string) (interface{}, bool) {
 func (c *Cache) Set(key string, value interface{}, ttl time.Duration) {
     c.mu.Lock()          // Lock for writing
     defer c.mu.Unlock()
-    
+
     c.data[key] = CacheEntry{
         Value:      value,
         Expiration: time.Now().Add(ttl),
@@ -205,6 +220,7 @@ func (c *Cache) Delete(key string) {
 ```
 
 **Problems:**
+
 - Manual expiration check (CPU waste)
 - Memory grows indefinitely (need cleanup goroutine)
 - Lost on restart
@@ -239,6 +255,7 @@ func Delete(key string) {
 ```
 
 **Improvements:**
+
 - ✅ Automatic TTL (Redis handles expiration)
 - ✅ No memory management needed
 - ✅ Survives restart
@@ -270,16 +287,16 @@ var limiter = &RateLimit{
 func (rl *RateLimit) IsAllowed(key string, limit int, window time.Duration) bool {
     rl.mu.Lock()
     defer rl.mu.Unlock()
-    
+
     entry, exists := rl.users[key]
     now := time.Now()
-    
+
     // Check if window expired or new user
     if !exists || now.Sub(entry.WindowStart) > window {
         rl.users[key] = RateLimitEntry{count: 1, WindowStart: now}
         return true
     }
-    
+
     // Increment and check
     entry.count++
     rl.users[key] = entry
@@ -288,6 +305,7 @@ func (rl *RateLimit) IsAllowed(key string, limit int, window time.Duration) bool
 ```
 
 **Problems:**
+
 - Each server tracks separately
 - Attacker can bypass by hitting different servers
 - Reset on restart = abuse window
@@ -299,23 +317,24 @@ func (rl *RateLimit) IsAllowed(key string, limit int, window time.Duration) bool
 
 func IsAllowed(key string, limit int, window time.Duration) bool {
     redisKey := "ratelimit:" + key
-    
+
     // INCR is atomic! No race conditions
     count, err := redis.Client.Incr(context.Background(), redisKey).Result()
     if err != nil {
         return true  // Fail open
     }
-    
+
     // Set expiration only on first request
     if count == 1 {
         redis.Client.Expire(context.Background(), redisKey, window)
     }
-    
+
     return count <= int64(limit)
 }
 ```
 
 **Improvements:**
+
 - ✅ Atomic INCR (no race conditions, no mutex needed)
 - ✅ All servers share the same counter
 - ✅ Automatic TTL cleanup
@@ -402,5 +421,6 @@ if err != nil {
 ```
 
 **Why this matters:**
+
 - Without this fix: Each request from same IP gets different key (different port)
 - With fix: All requests from same IP share one counter

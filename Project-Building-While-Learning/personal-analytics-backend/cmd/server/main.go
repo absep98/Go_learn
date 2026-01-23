@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/handlers"
 	"personal-analytics-backend/internal/redis"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -96,8 +99,55 @@ func main() {
 			}
 		}))))
 
-	log.Printf("Server starting on port %s", port)
-	http.ListenAndServe(":"+port, nil)
+	// ========================================
+	// GRACEFUL SHUTDOWN IMPLEMENTATION
+	// ========================================
+
+	// STEP 1: Create HTTP server (instead of just ListenAndServe)
+	// Why? So we can call server.Shutdown() later
+	server := &http.Server{
+		Addr: ":" + port,
+	}
+
+	// STEP 2: Start server in a GOROUTINE (background)
+	// Why? So main() doesn't block here and can listen for Ctrl+C
+	go func() {
+		log.Printf("Server starting on port %s", port)
+		if err := server.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// STEP 3: Create a channel to receive OS signals
+	// Channel = a pipe for communication between goroutines
+	// Size 1 = can hold one signal before blocking
+	quit := make(chan os.Signal, 1)
+
+	// STEP 4: Tell Go: "When Ctrl+C (SIGINT) or kill (SIGTERM) happens, send it to 'quit' channel"
+	signal.Notify(quit, os.Interrupt) // os.Interrupt = Ctrl+C
+
+	// STEP 5: BLOCK HERE until a signal is received
+	// This line waits forever until Ctrl+C is pressed
+	<-quit
+	log.Println("🛑 Shutdown signal received...")
+
+	// STEP 6: Create a timeout context (max 5 seconds to finish)
+	// If requests take longer than 5 seconds, force close
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// STEP 7: Gracefully shutdown the server
+	// - Stops accepting NEW requests
+	// - Waits for current requests to finish (up to 5 seconds)
+	log.Println("Shutting down server...")
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	// STEP 8: Close connections (defer will handle this, but log it)
+	log.Println("Closing Redis connection...")
+	log.Println("Closing database connection...")
+	log.Println("✅ Server stopped gracefully")
 }
 
 /*

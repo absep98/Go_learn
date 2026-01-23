@@ -379,6 +379,111 @@ Week 2: 9/10 (Can implement auth, explain systems, ready for interviews)
 
 ---
 
+# Week 3: Scaling & Production Features (Jan 13-21, 2026)
+
+## What I Built ✅
+
+**Days 13-15: CRUD Completion & Pagination**
+
+- UPDATE operation (PATCH /entries?id=X)
+- DELETE operation (DELETE /entries?id=X)
+- Pagination with page/limit parameters
+- User-specific data isolation for all operations
+
+**Days 16-17: Caching Layer**
+
+- In-memory cache with TTL (time-to-live)
+- Mutex for thread safety
+- Cache invalidation on create/update/delete
+- COUNT query optimization
+
+**Day 18: Rate Limiting**
+
+- Fixed window rate limiting algorithm
+- 100 requests per minute per IP
+- Return 429 Too Many Requests when exceeded
+- System design notes on distributed rate limiting
+
+**Days 19-20: Redis Integration**
+
+- Docker Desktop installation
+- Redis container setup
+- Converted cache from in-memory to Redis
+- Converted rate limiter from in-memory to Redis
+- Learned Redis commands (SET, GET, INCR, EXPIRE, etc.)
+- Fixed IP extraction from RemoteAddr (port removal)
+
+## Key Concepts Learned 🧠
+
+| Concept | What I Learned |
+|---------|---------------|
+| **Pagination** | LIMIT/OFFSET vs cursor-based, deep paging problems |
+| **Caching** | TTL, cache invalidation, thundering herd |
+| **Rate Limiting** | Fixed window vs sliding window vs token bucket |
+| **Redis** | Centralized storage, atomic operations (INCR), auto-TTL |
+| **Docker** | Containers, images, port mapping, exec commands |
+| **Distributed Systems** | Why in-memory doesn't scale, shared storage solutions |
+
+## Challenges & Breakthroughs 💡
+
+**Challenge 1: Redis keys not appearing**
+
+- Made requests but `KEYS *` showed empty
+- Cause: Server running old code (stale process)
+- Fix: Kill old process, rebuild, restart
+
+**Challenge 2: IP:Port in rate limit key**
+
+- `RemoteAddr` includes port (e.g., `[::1]:54321`)
+- Each connection got different key = broken rate limiting
+- Fix: `net.SplitHostPort()` to extract just IP
+
+**Breakthrough: In-Memory → Redis Pattern**
+
+```go
+// BEFORE (in-memory)
+c.mu.Lock()
+c.data[key] = value
+c.mu.Unlock()
+
+// AFTER (Redis)
+redis.Client.Set(ctx, key, value, ttl)
+// No mutex needed - Redis handles concurrency!
+```
+
+## System Design Questions I Can Answer
+
+1. "What breaks at 10,000 concurrent requests?" → Deep paging, cache stampede, DB concurrency
+2. "How would you implement rate limiting for distributed systems?" → Redis INCR with TTL
+3. "Why not use in-memory caching in production?" → Data loss on restart, not shared across servers
+
+---
+
+# Week 4 Plan (Jan 22+)
+
+## Day 21: Graceful Shutdown
+
+- Handle Ctrl+C signal properly
+- Close Redis and DB connections cleanly
+- Learn `os/signal` package
+- Production-ready server lifecycle
+
+## Day 22+: Background Workers / Async Processing
+
+- Worker pool pattern
+- Goroutines for async tasks
+- Job queues with Redis
+- Non-blocking operations
+
+## Week 4 Review (Consolidation)
+
+- Document all Week 3-4 learnings
+- Update interview stories
+- Create system design summaries
+- Architecture diagram updates
+
+---
+
 # What's Next
 
 ## Week 3 Preview (Scaling & Polish)
