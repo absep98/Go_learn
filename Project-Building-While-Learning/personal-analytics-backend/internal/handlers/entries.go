@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"personal-analytics-backend/internal/cache"
 	"personal-analytics-backend/internal/db"
+	"personal-analytics-backend/internal/worker"
 	"strconv"
 )
 
@@ -111,6 +112,13 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cache.Delete(fmt.Sprintf("count:user:%d", userID))
+
+	// Add background job to process this entry (async)
+	// This returns immediately - worker processes it in background
+	worker.AddJob("entry_created", map[string]interface{}{
+		"entry_id": id,
+		"user_id":  userID,
+	})
 
 	// All above are checks if passed then only allow to save it
 	// Success response
