@@ -1,7 +1,7 @@
 package worker
 
 import (
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -36,7 +36,7 @@ func StartWorkerPool(numWorkers int) {
 		go worker(i) // "go" = run in background
 	}
 
-	log.Printf("🔧 Started %d background workers", numWorkers)
+	slog.Info("Worker pool started", "num_workers", numWorkers, "queue_capacity", 100)
 }
 
 // worker is a single worker that processes jobs from the queue
@@ -47,12 +47,12 @@ func worker(id int) {
 		// "range JobQueue" = wait for next job, then process it
 		// When JobQueue is closed, this loop exits
 
-		log.Printf("👷 Worker %d: Processing job type=%s", id, job.Type)
+		slog.Info("Worker processing job", "worker_id", id, "job_type", job.Type)
 
 		// Process the job based on its type
 		processJob(job)
 
-		log.Printf("✅ Worker %d: Completed job type=%s", id, job.Type)
+		slog.Info("Worker completed job", "worker_id", id, "job_type", job.Type)
 	}
 }
 
@@ -62,15 +62,15 @@ func processJob(job Job) {
 	case "entry_created":
 		// Simulate sending notification / updating analytics
 		// In real app: send email, update stats, notify webhooks, etc.
-		log.Printf("   📝 Processing entry creation: %v", job.Payload)
+		slog.Debug("Processing entry creation", "payload", job.Payload)
 		time.Sleep(2 * time.Second) // Simulate slow task
 
 	case "entry_deleted":
-		log.Printf("   🗑️ Processing entry deletion: %v", job.Payload)
+		slog.Debug("Processing entry deletion", "payload", job.Payload)
 		time.Sleep(1 * time.Second)
 
 	default:
-		log.Printf("   ❓ Unknown job type: %s", job.Type)
+		slog.Warn("Unknown job type", "job_type", job.Type)
 	}
 }
 
@@ -84,8 +84,8 @@ func AddJob(jobType string, payload interface{}) {
 	// Non-blocking send (if queue is full, log warning)
 	select {
 	case JobQueue <- Job{Type: jobType, Payload: payload}:
-		log.Printf("📬 Job added to queue: %s", jobType)
+		slog.Info("Job added to queue", "job_type", jobType)
 	default:
-		log.Printf("⚠️ Job queue full! Dropping job: %s", jobType)
+		slog.Warn("Job queue full, dropping job", "job_type", jobType)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -15,12 +15,12 @@ import (
 // AuthMiddleware verifies JWT token before allowing access to protected routes
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Println("🔐 Middleware - Checking authentication")
+		slog.Debug("Auth middleware checking")
 
 		// STEP 1: Get token from Authorization header
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			log.Println("❌ No Authorization header found")
+			slog.Warn("No Authorization header found")
 			errorResponseAuth(w, http.StatusUnauthorized, "Authorization header required")
 			return
 		}
@@ -31,7 +31,7 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 		if tokenString == authHeader {
 			// TrimPrefix didn't remove anything = no "Bearer " prefix
-			log.Println("❌ Invalid Authorization header format")
+			slog.Warn("Invalid Authorization header format")
 			errorResponseAuth(w, http.StatusUnauthorized, "Invalid authorization format. Use: Bearer <token>")
 			return
 		}
@@ -39,7 +39,7 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// STEP 3: Verify token is valid and extract claims
 		claims, err := validateToken(tokenString)
 		if err != nil {
-			log.Printf("❌ Token validation failed: %v", err)
+			slog.Warn("Token validation failed", "error", err)
 			errorResponseAuth(w, http.StatusUnauthorized, "Invalid or expired token")
 			return
 		}
@@ -47,7 +47,7 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// STEP 4: Extract user_id from claims
 		userID, ok := claims["user_id"].(float64) // JWT numbers come as float64
 		if !ok {
-			log.Println("❌ user_id not found in token claims")
+			slog.Warn("user_id not found in token claims")
 			errorResponseAuth(w, http.StatusUnauthorized, "Invalid token claims")
 			return
 		}
@@ -56,7 +56,7 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		ctx := context.WithValue(r.Context(), "user_id", int64(userID))
 
 		// STEP 6: Call next handler with updated context
-		log.Printf("✅ User %d authenticated successfully", int64(userID))
+		slog.Debug("User authenticated", "user_id", int64(userID))
 		next(w, r.WithContext(ctx))
 	}
 }

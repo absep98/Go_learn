@@ -2,7 +2,7 @@ package redis
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -21,13 +21,13 @@ func InitRedis(addr string) error {
 		return err
 	}
 
-	log.Println("Redis connected successfully")
+	slog.Info("Redis connected", "addr", addr)
 	return nil
 }
 
 func CloseRedis() {
 	if Client != nil {
 		Client.Close()
-		log.Println("Redis connection closed")
+		slog.Info("Redis connection closed")
 	}
 }

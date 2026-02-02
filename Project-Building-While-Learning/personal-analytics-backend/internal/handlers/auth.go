@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -42,7 +42,7 @@ type LoginResponse struct {
 
 // Register handles POST /register
 func Register(w http.ResponseWriter, r *http.Request) {
-	log.Println("📝 POST /register - Registration request received")
+	slog.Info("Request received", "method", "POST", "path", "/register")
 
 	// Only allow POST method
 	if r.Method != http.MethodPost {
@@ -95,7 +95,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	// bcrypt.DefaultCost = 10 (good balance between security and speed)
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("Error hashing password: %v", err)
+		slog.Error("Error hashing password", "error", err)
 		errorResponseAuth(w, http.StatusInternalServerError, "Failed to process password")
 		return
 	}
@@ -109,13 +109,13 @@ func Register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Error creating user: %v", err)
+		slog.Error("Error creating user", "error", err)
 		errorResponseAuth(w, http.StatusInternalServerError, "Failed to create user")
 		return
 	}
 
 	// Success response
-	log.Printf("✅ User registered successfully with ID: %d", userID)
+	slog.Info("User registered", "user_id", userID)
 	respondJSON(w, http.StatusCreated, RegisterResponse{
 		Success: true,
 		Message: "User registered successfully",
@@ -125,7 +125,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 
 // Login handles POST /login
 func Login(w http.ResponseWriter, r *http.Request) {
-	log.Println("🔐 POST /login - Login request received")
+	slog.Info("Request received", "method", "POST", "path", "/login")
 
 	// Only allow POST method
 	if r.Method != http.MethodPost {
@@ -156,7 +156,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	userID, passwordHash, err := db.GetUserByEmail(req.Email)
 	if err != nil {
 		// Don't reveal if user exists or not (security best practice)
-		log.Printf("Login attempt for non-existent user: %s", req.Email)
+		slog.Warn("Login attempt for non-existent user", "email", req.Email)
 		errorResponseAuth(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
@@ -169,7 +169,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password))
 	if err != nil {
 		// Password doesn't match
-		log.Printf("Invalid password attempt for user ID: %d", userID)
+		slog.Warn("Invalid password attempt", "user_id", userID)
 		errorResponseAuth(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
@@ -178,7 +178,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	// JWT token = "ticket" proving user logged in (contains user_id)
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		log.Println("JWT_SECRET not set in environment")
+		slog.Error("JWT_SECRET not set in environment")
 		errorResponseAuth(w, http.StatusInternalServerError, "Server configuration error")
 		return
 	}
@@ -210,13 +210,13 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 	tokenString, err := token.SignedString([]byte(secret))
 	if err != nil {
-		log.Printf("Error generating JWT token: %v", err)
+		slog.Error("Error generating JWT token", "error", err)
 		errorResponseAuth(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
 	// Success response with token
-	log.Printf("✅ User logged in successfully with ID: %d", userID)
+	slog.Info("User logged in", "user_id", userID)
 	respondJSON(w, http.StatusOK, LoginResponse{
 		Success: true,
 		Message: "Login successful",

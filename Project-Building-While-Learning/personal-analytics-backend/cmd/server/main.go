@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/handlers"
+	"personal-analytics-backend/internal/logger"
 	"personal-analytics-backend/internal/redis"
 	"personal-analytics-backend/internal/worker"
 	"time"
@@ -37,10 +38,15 @@ import (
 	}
 */
 func main() {
+	// ========================================
+	// STEP 0: Initialize structured logging FIRST
+	// ========================================
+	logger.InitLogger()
+
 	// Load .env file
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("No .env file found")
+		slog.Warn("No .env file found")
 	}
 
 	// Initialize database
@@ -50,12 +56,14 @@ func main() {
 	}
 	err = db.InitDB(dbPath)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		slog.Error("Failed to initialize database", "error", err)
+		os.Exit(1)
 	}
 
 	err = redis.InitRedis("localhost:6379")
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		slog.Error("Failed to connect to Redis", "error", err)
+		os.Exit(1)
 	}
 	defer redis.CloseRedis()
 
@@ -116,9 +124,10 @@ func main() {
 	// STEP 2: Start server in a GOROUTINE (background)
 	// Why? So main() doesn't block here and can listen for Ctrl+C
 	go func() {
-		log.Printf("Server starting on port %s", port)
+		slog.Info("Server starting", "port", port)
 		if err := server.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			slog.Error("Server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -133,7 +142,7 @@ func main() {
 	// STEP 5: BLOCK HERE until a signal is received
 	// This line waits forever until Ctrl+C is pressed
 	<-quit
-	log.Println("🛑 Shutdown signal received...")
+	slog.Warn("Shutdown signal received")
 
 	// STEP 6: Create a timeout context (max 5 seconds to finish)
 	// If requests take longer than 5 seconds, force close
@@ -143,15 +152,14 @@ func main() {
 	// STEP 7: Gracefully shutdown the server
 	// - Stops accepting NEW requests
 	// - Waits for current requests to finish (up to 5 seconds)
-	log.Println("Shutting down server...")
+	slog.Info("Shutting down server", "timeout_seconds", 5)
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		slog.Error("Server shutdown error", "error", err)
 	}
 
 	// STEP 8: Close connections (defer will handle this, but log it)
-	log.Println("Closing Redis connection...")
-	log.Println("Closing database connection...")
-	log.Println("✅ Server stopped gracefully")
+	slog.Info("Closing connections", "redis", "closing", "database", "closing")
+	slog.Info("Server stopped gracefully")
 }
 
 /*

@@ -1,19 +1,30 @@
 package handlers
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
 
+// LoggingMiddleware logs each request with method, path, and duration
+// This is now structured logging - much easier to parse and analyze!
 func LoggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		current_time := time.Now().Format("2006-01-02 15:04:05")
-		request_type := r.Method
-		request_path := r.URL.Path
+		start := time.Now()
 
-		log.Printf("%s %s %s", current_time, request_type, request_path)
-
+		// Call the actual handler
 		next(w, r)
+
+		// Calculate how long the request took
+		duration := time.Since(start)
+
+		// Log structured data (key-value pairs)
+		// This outputs JSON like:
+		// {"time":"...","level":"INFO","msg":"Request","method":"GET","path":"/health","duration_ms":5}
+		slog.Info("Request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"duration_ms", duration.Milliseconds(),
+		)
 	}
 }

@@ -3,7 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"personal-analytics-backend/internal/cache"
 	"strconv"
 	"time"
@@ -45,7 +45,7 @@ func InitDB(dbPath string) error {
 		return err
 	}
 
-	log.Println("Database connected successfully")
+	slog.Info("Database connected", "path", dbPath)
 
 	// Create tables
 	err = createTables()
@@ -88,7 +88,7 @@ func createTables() error {
 		return err
 	}
 
-	log.Println("Tables created successfully")
+	slog.Info("Database tables created")
 	return nil
 }
 
@@ -111,7 +111,7 @@ func InsertEntry(userID int, text string, mood int, category string) (int64, err
 		return 0, err
 	}
 
-	log.Printf("Inserted entry with ID: %d", id)
+	slog.Debug("Entry inserted", "entry_id", id)
 	return id, nil
 }
 
@@ -306,7 +306,7 @@ func CreateUser(email string, passwordHash string) (int64, error) {
 		return 0, err
 	}
 
-	log.Printf("User created with ID: %d", id)
+	slog.Debug("User created", "user_id", id)
 	return id, nil
 }
 

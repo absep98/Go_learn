@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"personal-analytics-backend/internal/cache"
 	"personal-analytics-backend/internal/db"
@@ -47,7 +47,7 @@ func errorResponse(w http.ResponseWriter, status int, message string) {
 
 // CreateEntry handles POST /entries
 func CreateEntry(w http.ResponseWriter, r *http.Request) {
-	log.Println("📨 POST /entries - Request received")
+	slog.Info("Request received", "method", "POST", "path", "/entries")
 
 	// Only allow POST method
 	if r.Method != http.MethodPost {
@@ -67,7 +67,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("🔍 Creating entry for user ID: %d", userID)
+	slog.Debug("Creating entry", "user_id", userID)
 
 	// Parse JSON request body
 	var req CreateEntryRequest
@@ -122,7 +122,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 
 	// All above are checks if passed then only allow to save it
 	// Success response
-	log.Printf("✅ Entry created successfully with ID: %d", id)
+	slog.Info("Entry created", "entry_id", id, "user_id", userID)
 	respondJSON(w, http.StatusCreated, CreateEntryResponse{
 		Success: true,
 		Message: "Entry created successfully",
@@ -134,7 +134,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 // Returns entries for the authenticated user only
 // Supports pagination: ?page=1&limit=10
 func GetEntries(w http.ResponseWriter, r *http.Request) {
-	log.Println("📚 GET /entries - Request received")
+	slog.Info("Request received", "method", "GET", "path", "/entries")
 
 	// Only allow GET method
 	if r.Method != http.MethodGet {
@@ -174,7 +174,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	userID, ok := userIDValue.(int64)
 	if !ok {
-		log.Printf("❌ Failed to extract user_id from context: %v", userIDValue)
+		slog.Error("Failed to extract user_id from context", "value", userIDValue)
 		respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false,
 			"message": "Invalid authentication data",
@@ -182,7 +182,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("🔍 Fetching entries for user ID: %d (page=%d, limit=%d)", userID, page, limit)
+	slog.Debug("Fetching entries", "user_id", userID, "page", page, "limit", limit)
 
 	// Get entries for this user only
 	// Note: int(userID) converts int64 to int to match function signature
@@ -199,7 +199,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 	totalPages := (total + limit - 1) / limit
 
 	// Success response with entries and pagination metadata
-	log.Printf("✅ Returning %d entries for user %d (page %d of %d)", len(entries), userID, page, totalPages)
+	slog.Info("Entries returned", "count", len(entries), "user_id", userID, "page", page, "total_pages", totalPages)
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"success":    true,
 		"entries":    entries,
@@ -230,7 +230,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 
 	entryId, err := strconv.Atoi(r.URL.Query().Get("id"))
 	if err != nil {
-		log.Printf("❌ Invalid entry ID: %v", err)
+		slog.Warn("Invalid entry ID", "error", err)
 		errorResponse(w, http.StatusBadRequest, "Invalid or missing entry ID")
 		return
 	}
@@ -246,7 +246,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Invalid authentication data")
 		return
 	}
-	log.Printf("🔍 Updating entry for user ID: %d", userID)
+	slog.Debug("Updating entry", "entry_id", entryId, "user_id", userID)
 
 	var req CreateEntryRequest
 	err = json.NewDecoder(r.Body).Decode(&req)
@@ -273,7 +273,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	// Call database to update entry
 	rowsAffected, err := db.UpdateEntry(entryId, userID, req.Text, req.Mood, req.Category)
 	if err != nil {
-		log.Printf("❌ Database error: %v", err)
+		slog.Error("Database error on update", "error", err, "entry_id", entryId)
 		errorResponse(w, http.StatusInternalServerError, "Failed to update entry")
 		return
 	}
@@ -286,7 +286,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	cache.Delete(fmt.Sprintf("count:user:%d", userID))
 
 	// Success response
-	log.Printf("✅ Entry %d updated successfully for user %d", entryId, userID)
+	slog.Info("Entry updated", "entry_id", entryId, "user_id", userID)
 	respondJSON(w, http.StatusOK, CreateEntryResponse{
 		Success: true,
 		Message: "Entry updated successfully",
@@ -302,7 +302,7 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 
 	entryId, err := strconv.Atoi(r.URL.Query().Get("id"))
 	if err != nil {
-		log.Printf("Invalid entry ID : %v", err)
+		slog.Warn("Invalid entry ID", "error", err)
 		errorResponse(w, http.StatusBadRequest, "Invalid or missing entry ID")
 		return
 	}
@@ -319,12 +319,12 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Deleting entry for user ID %d", userID)
+	slog.Debug("Deleting entry", "entry_id", entryId, "user_id", userID)
 
 	rowsAffected, err := db.DeleteEntry(entryId, userID)
 
 	if err != nil {
-		log.Printf("Database error : %v", err)
+		slog.Error("Database error on delete", "error", err, "entry_id", entryId)
 		errorResponse(w, http.StatusInternalServerError, "Failed to delete entry")
 		return
 	}
@@ -335,7 +335,7 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cache.Delete(fmt.Sprintf("count:user:%d", userID))
-	log.Printf("Entry %d deleted successfully for user %d", entryId, userID)
+	slog.Info("Entry deleted", "entry_id", entryId, "user_id", userID)
 	respondJSON(w, http.StatusOK, CreateEntryResponse{
 		Success: true,
 		Message: "Entry deleted successfully",
