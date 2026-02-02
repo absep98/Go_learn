@@ -457,51 +457,173 @@ redis.Client.Set(ctx, key, value, ttl)
 2. "How would you implement rate limiting for distributed systems?" → Redis INCR with TTL
 3. "Why not use in-memory caching in production?" → Data loss on restart, not shared across servers
 
+**Day 21: Graceful Shutdown**
+
+- `os/signal` package to catch Ctrl+C (SIGINT)
+- Channels to communicate shutdown signal
+- `context.WithTimeout` for 5-second shutdown deadline
+- `server.Shutdown(ctx)` to finish in-flight requests
+- Proper cleanup of Redis and DB connections
+
+**Day 22: Enhanced Health Checks**
+
+- Health endpoint pings Redis AND database
+- Returns structured JSON with component status
+- Returns 200 when healthy, 503 when any service down
+- Production-ready monitoring endpoint
+
+**Day 23: Background Worker Pool**
+
+- Job struct with Type and Payload
+- Buffered channel as job queue (capacity 100)
+- Goroutines as workers processing jobs concurrently
+- Non-blocking job submission with `select`
+- Triggered on entry creation for async processing
+
+## Key Concepts Learned 🧠
+
+| Concept | What I Learned |
+|---------|---------------|
+| **Graceful Shutdown** | Stop accepting new requests, finish current ones, cleanup resources |
+| **os/signal** | Notify channel when OS sends interrupt signal |
+| **Goroutines** | Lightweight threads - `go func()` runs in background |
+| **Channels** | Pipes for goroutine communication - `chan Job` |
+| **Buffered Channels** | `make(chan Job, 100)` - holds 100 items before blocking |
+| **range over channel** | `for job := range JobQueue` blocks until job arrives |
+| **select statement** | Non-blocking channel operations with default case |
+| **context.WithTimeout** | Automatic cancellation after deadline |
+
+## Breakthroughs 💡
+
+**Breakthrough 1: Understanding Goroutines + Channels Together**
+
+```go
+// The worker pool pattern:
+JobQueue := make(chan Job, 100)  // Create the "pipe"
+
+go worker(id)  // Start worker in background
+
+for job := range JobQueue {  // Worker blocks here, waiting for jobs
+    processJob(job)           // When job arrives, process it
+}
+
+JobQueue <- Job{...}  // Add job to queue - wakes up a worker!
+```
+
+**Analogy that clicked:** Pizza shop with multiple chefs
+- `JobQueue` = order counter where tickets pile up
+- `worker` goroutines = chefs waiting for orders
+- `range JobQueue` = chef grabs next ticket when free
+- `go worker(id)` = hire a chef to work in background
+
+**Breakthrough 2: Graceful Shutdown Flow**
+
+```
+Ctrl+C pressed
+    ↓
+signal.Notify sends to 'quit' channel
+    ↓
+<-quit unblocks main()
+    ↓
+server.Shutdown(ctx) called
+    ↓
+Server stops accepting NEW requests
+    ↓
+Waits for current requests (up to 5 seconds)
+    ↓
+defer statements run (close Redis, DB)
+    ↓
+Program exits cleanly
+```
+
+**Breakthrough 3: Health Check Pattern**
+
+```go
+// Don't re-initialize! Ping existing connection
+err := redis.Client.Ping(ctx).Err()
+if err != nil {
+    redisStatus = "disconnected"
+    healthy = false
+}
+```
+
+## Confidence Crisis & Recovery (Day 21) 🧘
+
+**The fear:** "I got that fear again that I'll not be able to build this on my own"
+
+**The test:** Asked to answer 3 conceptual questions without help
+
+**Results:**
+1. ✅ Knew `context.WithTimeout` creates deadline-based cancellation
+2. ✅ Understood `server.Shutdown` stops new requests, finishes current
+3. ✅ Knew goroutines don't share memory automatically (channels needed)
+
+**Lesson:** I understand concepts even when syntax feels shaky. Pattern recognition > memorization.
+
+## Interview-Ready Stories (Week 3)
+
+### Story 1: "How I Handle Graceful Shutdown"
+
+"When my Go server receives Ctrl+C, I don't just kill it. I use `os/signal.Notify` to catch the signal, then call `server.Shutdown` with a 5-second timeout context. This stops accepting new requests while letting in-flight requests complete. Finally, deferred statements close Redis and database connections cleanly. No dropped requests, no resource leaks."
+
+### Story 2: "Why I Migrated to Redis"
+
+"Initially I used in-memory maps with mutexes for caching and rate limiting. But I realized: if I deploy two servers, each has its own cache—users hit different rate limits per server! Redis solves this: it's a centralized store all servers share. Plus, Redis INCR is atomic, so I don't need mutexes anymore. It was a key lesson in thinking beyond single-server architecture."
+
+### Story 3: "Implementing Background Workers"
+
+"When a user creates an entry, I don't want them waiting for slow tasks like sending notifications. So I built a worker pool: a buffered channel holds jobs, and 3 goroutines constantly `range` over that channel. The handler just adds a job to the queue and responds immediately. Workers process jobs in background. It's the producer-consumer pattern in Go, using channels for thread-safe communication."
+
 ---
 
-# Week 4 Plan (Jan 22+)
+# Week 4 Plan (Feb 2+)
 
-## Day 21: Graceful Shutdown
+## Focus: Polish & Deployment Readiness
 
-- Handle Ctrl+C signal properly
-- Close Redis and DB connections cleanly
-- Learn `os/signal` package
-- Production-ready server lifecycle
+**Day 24-25: Structured Logging**
+- Replace `log.Printf` with structured JSON logging
+- Add request IDs for tracing
+- Log levels (INFO, WARN, ERROR)
+- Learn `slog` package (Go 1.21+)
 
-## Day 22+: Background Workers / Async Processing
+**Day 26-27: Metrics & Monitoring**
+- Add `/metrics` endpoint
+- Track request counts, response times
+- Prometheus-style metrics format
+- Understand observability basics
 
-- Worker pool pattern
-- Goroutines for async tasks
-- Job queues with Redis
-- Non-blocking operations
+**Day 28-29: Configuration & Environment**
+- Move all config to environment variables
+- Add configuration validation on startup
+- Different configs for dev/prod
+- 12-Factor App principles
 
-## Week 4 Review (Consolidation)
-
-- Document all Week 3-4 learnings
-- Update interview stories
-- Create system design summaries
-- Architecture diagram updates
+**Day 30: Documentation & Review**
+- Update API documentation
+- Create deployment guide
+- Final architecture review
+- Interview prep consolidation
 
 ---
 
-# What's Next
+# Cumulative Progress
 
-## Week 3 Preview (Scaling & Polish)
+## Technical Capabilities
 
-**Planned Features:**
+**Week 1:** HTTP server, SQLite, CRUD, validation, security fundamentals  
+**Week 2:** JWT auth, middleware, protected routes, testing  
+**Week 3:** Pagination, caching, rate limiting, Redis, graceful shutdown, worker pools
 
-- UPDATE and DELETE operations
-- Pagination for GET /entries
-- Caching layer
-- Rate limiting
-- Background job processing
+**Total:** Production-ready backend with auth, caching, rate limiting, background processing, and proper shutdown handling.
 
-**Learning Focus:**
+## Confidence Trajectory
 
-- System design thinking (scaling considerations)
-- Performance optimization
-- Async processing with goroutines
-- Production deployment considerations
+```
+Week 0: 3/10 (Just SDET, scared of backend)
+Week 1: 7/10 (Can build CRUD, understand security)
+Week 2: 9/10 (Can implement auth, explain systems)
+Week 3: 9/10 (Can scale systems, use Redis, goroutines)
+```
 
 ---
 
@@ -515,17 +637,15 @@ This shifted my thinking from "I should know everything" to "I should understand
 
 # Final Achievement Statement
 
-**In 2 weeks, I built a production-ready authentication system** with registration, login, JWT tokens, middleware protection, user-specific data isolation, and comprehensive testing.
+**In 3 weeks, I built a production-ready backend** with JWT authentication, CRUD operations, pagination, Redis caching, rate limiting, graceful shutdown, and background worker pools.
 
 **I can confidently say in interviews:**
 
-> "I designed and built a backend service in Go with JWT auth, middleware protection, user-specific data isolation, and security best practices. It includes comprehensive testing with 18 test scenarios covering registration, login, authentication, and data operations."
-
-That sentence alone changes my backend developer profile.
+> "I designed and built a Go backend service with JWT auth, Redis caching, rate limiting, graceful shutdown, and async worker pools. It handles concurrent requests with goroutines, uses channels for job queues, and properly cleans up resources on shutdown. I understand both the code AND the system design trade-offs."
 
 ---
 
-**Status:** Week 2 Complete ✅
+**Status:** Week 3 Complete ✅
 **Confidence Level:** 9/10
 **Ready for:** Backend Developer Interviews
-**Next:** Week 3 (Scaling & Advanced Features)
+**Next:** Week 4 (Polish & Deployment Readiness)
