@@ -86,30 +86,31 @@ func main() {
 		port = "8080"
 	}
 
-	http.HandleFunc("/health", handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.HealthHandler)))
-	http.HandleFunc("/ping", handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.PingHandler)))
+	http.HandleFunc("/health", handlers.RequestIDMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.HealthHandler))))
+	http.HandleFunc("/ping", handlers.RequestIDMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.PingHandler))))
 
 	// Auth endpoints (no protection needed)
-	http.HandleFunc("/register", handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Register)))
-	http.HandleFunc("/login", handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Login)))
+	http.HandleFunc("/register", handlers.RequestIDMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Register))))
+	http.HandleFunc("/login", handlers.RequestIDMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Login))))
 
 	// Entries endpoints (PROTECTED - requires authentication)
-	http.HandleFunc("/entries", handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
-		handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodPost {
-				handlers.CreateEntry(w, r)
-			} else if r.Method == http.MethodGet {
-				handlers.GetEntries(w, r)
-			} else if r.Method == http.MethodPatch {
-				// PATCH /entries?id=5 - Update an entry
-				handlers.UpdateEntry(w, r)
-			} else if r.Method == http.MethodDelete {
-				// Delete /entries?id=5 - Delete an entry
-				handlers.DeleteEntry(w, r)
-			} else {
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			}
-		}))))
+	http.HandleFunc("/entries", handlers.RequestIDMiddleware(
+		handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
+			handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					handlers.CreateEntry(w, r)
+				} else if r.Method == http.MethodGet {
+					handlers.GetEntries(w, r)
+				} else if r.Method == http.MethodPatch {
+					// PATCH /entries?id=5 - Update an entry
+					handlers.UpdateEntry(w, r)
+				} else if r.Method == http.MethodDelete {
+					// Delete /entries?id=5 - Delete an entry
+					handlers.DeleteEntry(w, r)
+				} else {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+			})))))
 
 	// ========================================
 	// GRACEFUL SHUTDOWN IMPLEMENTATION

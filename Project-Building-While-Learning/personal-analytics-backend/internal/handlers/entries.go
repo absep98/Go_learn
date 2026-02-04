@@ -47,7 +47,8 @@ func errorResponse(w http.ResponseWriter, status int, message string) {
 
 // CreateEntry handles POST /entries
 func CreateEntry(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Request received", "method", "POST", "path", "/entries")
+	logger := GetLoggerWithRequestID(r)
+	logger.Info("Request received", "method", "POST", "path", "/entries")
 
 	// Only allow POST method
 	if r.Method != http.MethodPost {
@@ -67,7 +68,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Debug("Creating entry", "user_id", userID)
+	logger.Debug("Creating entry", "user_id", userID)
 
 	// Parse JSON request body
 	var req CreateEntryRequest
@@ -122,7 +123,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 
 	// All above are checks if passed then only allow to save it
 	// Success response
-	slog.Info("Entry created", "entry_id", id, "user_id", userID)
+	logger.Info("Entry created", "entry_id", id, "user_id", userID)
 	respondJSON(w, http.StatusCreated, CreateEntryResponse{
 		Success: true,
 		Message: "Entry created successfully",

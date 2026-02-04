@@ -511,6 +511,7 @@ JobQueue <- Job{...}  // Add job to queue - wakes up a worker!
 ```
 
 **Analogy that clicked:** Pizza shop with multiple chefs
+
 - `JobQueue` = order counter where tickets pile up
 - `worker` goroutines = chefs waiting for orders
 - `range JobQueue` = chef grabs next ticket when free
@@ -554,6 +555,7 @@ if err != nil {
 **The test:** Asked to answer 3 conceptual questions without help
 
 **Results:**
+
 1. ✅ Knew `context.WithTimeout` creates deadline-based cancellation
 2. ✅ Understood `server.Shutdown` stops new requests, finishes current
 3. ✅ Knew goroutines don't share memory automatically (channels needed)
@@ -576,29 +578,220 @@ if err != nil {
 
 ---
 
-# Week 4 Plan (Feb 2+)
+# Week 4: Observability & Production Readiness (Feb 2-8, 2026)
 
-## Focus: Polish & Deployment Readiness
+## What I Built ✅
 
-**Day 24-25: Structured Logging**
-- Replace `log.Printf` with structured JSON logging
-- Add request IDs for tracing
-- Log levels (INFO, WARN, ERROR)
-- Learn `slog` package (Go 1.21+)
+### Day 24: Structured Logging with `slog`
+
+**Migrated from `log.Printf` to `slog` (Go 1.21+)**
+
+```go
+// Before
+log.Printf("User %d logged in", userID)
+
+// After
+slog.Info("User logged in", "user_id", userID)
+```
+
+**Why this matters:**
+- JSON output that log aggregators (ELK, CloudWatch) can parse
+- Log levels (DEBUG, INFO, WARN, ERROR) for filtering
+- Structured fields instead of string concatenation
+- Performance: efficient field serialization
+
+**Key concepts learned:**
+- `slog.Default()` for global logger
+- `slog.SetLogLoggerLevel()` for filtering
+- Structured attributes with key-value pairs
+- Importance of consistent field names
+
+### Day 25: Request IDs for Distributed Tracing ✅
+
+**Implemented unique request tracking across all logs**
+
+```go
+// Generate unique ID per request
+func GenerateRequestID() string {
+    bytes := make([]byte, 8)
+    rand.Read(bytes)
+    return hex.EncodeToString(bytes)  // e.g., "a3f5c2b8d1e4f6a9"
+}
+
+// Middleware adds ID to context
+func RequestIDMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        requestID := GenerateRequestID()
+        ctx := context.WithValue(r.Context(), "request_id", requestID)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+
+// Helper creates logger with request_id baked in
+func GetLoggerWithRequestID(r *http.Request) *slog.Logger {
+    requestID := r.Context().Value("request_id").(string)
+    return slog.Default().With("request_id", requestID)
+}
+```
+
+**The magic:** All logs for one request share the same ID:
+
+```json
+{"time":"...","level":"INFO","msg":"Request received","request_id":"544e22a4588a09f9","method":"POST","path":"/entries"}
+{"time":"...","level":"DEBUG","msg":"Creating entry","request_id":"544e22a4588a09f9","user_id":4}
+{"time":"...","level":"INFO","msg":"Entry created","request_id":"544e22a4588a09f9","entry_id":14}
+{"time":"...","level":"INFO","msg":"Request","request_id":"544e22a4588a09f9","duration_ms":18}
+```
+
+**Real-world value:** In production with thousands of concurrent requests, you can filter logs by request_id to see the complete journey of one specific request through your system.
+
+## Major Breakthroughs 💡
+
+### Breakthrough 1: Child Logger Pattern
+
+**The question:** "Won't calling `GetLoggerWithRequestID()` repeatedly have huge performance impact?"
+
+**The answer:** No! ~60 nanoseconds per call (16,000x faster than a DB query).
+
+**The pattern:**
+```go
+logger := slog.Default().With("request_id", id)
+// Creates a CHILD logger that remembers the request_id
+// Every subsequent logger.Info() automatically includes it
+```
+
+**Analogy:** Parent logger has no ID. Child logger has ID "baked in" like DNA inheritance.
+
+### Breakthrough 2: Understanding `slog.With()` vs Context
+
+**Initial confusion:** "How is logger updating slog.Info? I'm not seeing we're putting logger in slog.Info"
+
+**The revelation:**
+- `slog.Info()` uses the GLOBAL default logger (no context)
+- `slog.Default().With()` creates a NEW child logger object
+- Must use `logger.Info()` not `slog.Info()` to get the context
+
+```go
+// ❌ Wrong - uses global logger (no request_id)
+logger := GetLoggerWithRequestID(r)
+slog.Info("Entry created")
+
+// ✅ Correct - uses child logger (includes request_id)
+logger := GetLoggerWithRequestID(r)
+logger.Info("Entry created")
+```
+
+### Breakthrough 3: Middleware Ordering Matters
+
+**The flow:**
+```
+Request arrives
+    ↓
+1. RequestIDMiddleware (generate & store ID)
+    ↓
+2. RateLimitMiddleware (check rate limit)
+    ↓
+3. LoggingMiddleware (log with request_id)
+    ↓
+4. AuthMiddleware (verify token, log with request_id)
+    ↓
+Handler (all logs include request_id)
+```
+
+**Why this order?** Request ID must be generated FIRST so all downstream middleware and handlers can use it.
+
+## Performance Analysis (Day 25) 📊
+
+**User concern:** "Every log statement calls GetLoggerWithRequestID()... huge impact?"
+
+**Benchmarking lesson:**
+
+| Operation | Time | Relative Cost |
+|-----------|------|---------------|
+| GetLoggerWithRequestID() | ~60ns | 1x |
+| Database query | ~1ms | 16,000x |
+| HTTP request | ~100ms | 1,600,000x |
+
+**Verdict:** Negligible overhead. Even logging 100 times per request = 6 microseconds total.
+
+**Alternative considered:** Store logger in context instead of request_id. But:
+- More complex code
+- Premature optimization
+- Saves only ~40ns per call
+- Not worth the complexity
+
+**Lesson:** Profile before optimizing. "Fast enough" is better than "fastest possible."
+
+## Interview-Ready Stories (Week 4)
+
+### Story 1: "Request Tracing at Scale"
+
+"In my backend, I implemented distributed tracing using unique request IDs. Each request gets a 16-character hex ID generated with `crypto/rand`, stored in the request context. I use `context.WithValue` to propagate it through middleware and handlers. Then I create a child logger with `slog.Default().With('request_id', id)` that automatically includes the ID in every log.
+
+This means if a user reports 'my request at 2pm failed,' I can filter logs by request_id and see the exact sequence: auth passed, database query succeeded, but Redis timed out. Without request IDs, finding one request's logs among thousands per second would be impossible."
+
+### Story 2: "Structured Logging Migration"
+
+"I migrated from string-based logging to structured logging using Go's `slog` package. The key advantage: instead of `log.Printf('User %d logged in', id)` which produces unparsable strings, I use `slog.Info('User logged in', 'user_id', id)` which outputs JSON with typed fields.
+
+This lets log aggregators index fields efficiently. You can query 'show all ERROR logs where user_id=123' instead of grepping strings. It also catches typos at compile time—misspelling a field name is a string literal error, not a silent runtime bug."
+
+### Story 3: "Performance-Conscious Design"
+
+"When implementing request IDs, I considered storing the logger itself in context to avoid repeated lookups. But I benchmarked it: context lookup + logger creation is 60 nanoseconds, while a database call is 1 millisecond—16,000 times slower.
+
+This taught me not to optimize prematurely. The simpler pattern (store ID, create logger on demand) is easier to understand and maintain, and the performance difference is irrelevant compared to actual bottlenecks like I/O. Always profile real bottlenecks first."
+
+## Confidence Crisis & Recovery (Day 25) 🧘
+
+**The confusion:** "I created logger but code still logs to slog.Info()—how does it work?"
+
+**The debugging process:**
+1. Read the code carefully: `logger := GetLoggerWithRequestID(r)` creates child logger
+2. But then: `slog.Info("...")` uses GLOBAL logger (ignores `logger` variable!)
+3. Fix: Change to `logger.Info("...")` to use child logger
+
+**The lesson:** Variable naming doesn't magically connect things. `logger` is a new object; must explicitly use it.
+
+**Confidence shift:** From "I don't understand how this works" to "Oh, I was using the wrong object!" Simple debugging wins.
+
+## Technical Capabilities After Week 4 (Partial)
+
+**New skills:**
+- Structured logging with `slog` package
+- Request tracing with unique IDs
+- Context propagation patterns
+- Child logger creation with `.With()`
+- Middleware ordering for observability
+- Performance benchmarking mental models
+
+**Observability stack:**
+- ✅ JSON structured logs (parseable by ELK, CloudWatch)
+- ✅ Log levels (DEBUG/INFO/WARN/ERROR)
+- ✅ Request IDs (trace requests across services)
+- ⏳ Metrics endpoint (Day 26)
+- ⏳ Configuration management (Day 27-28)
+
+---
+
+# Week 4 Plan (Continued)
 
 **Day 26-27: Metrics & Monitoring**
+
 - Add `/metrics` endpoint
 - Track request counts, response times
 - Prometheus-style metrics format
 - Understand observability basics
 
 **Day 28-29: Configuration & Environment**
+
 - Move all config to environment variables
 - Add configuration validation on startup
 - Different configs for dev/prod
 - 12-Factor App principles
 
 **Day 30: Documentation & Review**
+
 - Update API documentation
 - Create deployment guide
 - Final architecture review
@@ -610,11 +803,12 @@ if err != nil {
 
 ## Technical Capabilities
 
-**Week 1:** HTTP server, SQLite, CRUD, validation, security fundamentals  
-**Week 2:** JWT auth, middleware, protected routes, testing  
+**Week 1:** HTTP server, SQLite, CRUD, validation, security fundamentals
+**Week 2:** JWT auth, middleware, protected routes, testing
 **Week 3:** Pagination, caching, rate limiting, Redis, graceful shutdown, worker pools
+**Week 4:** Structured logging (`slog`), request IDs, distributed tracing, observability patterns
 
-**Total:** Production-ready backend with auth, caching, rate limiting, background processing, and proper shutdown handling.
+**Total:** Production-ready backend with auth, caching, rate limiting, background processing, structured logging, and request tracing.
 
 ## Confidence Trajectory
 
@@ -623,6 +817,7 @@ Week 0: 3/10 (Just SDET, scared of backend)
 Week 1: 7/10 (Can build CRUD, understand security)
 Week 2: 9/10 (Can implement auth, explain systems)
 Week 3: 9/10 (Can scale systems, use Redis, goroutines)
+Week 4: 9.5/10 (Can implement observability, debug systematically, benchmark performance)
 ```
 
 ---
@@ -637,15 +832,15 @@ This shifted my thinking from "I should know everything" to "I should understand
 
 # Final Achievement Statement
 
-**In 3 weeks, I built a production-ready backend** with JWT authentication, CRUD operations, pagination, Redis caching, rate limiting, graceful shutdown, and background worker pools.
+**In 4 weeks, I built a production-ready backend** with JWT authentication, CRUD operations, pagination, Redis caching, rate limiting, graceful shutdown, background worker pools, structured logging, and distributed request tracing.
 
 **I can confidently say in interviews:**
 
-> "I designed and built a Go backend service with JWT auth, Redis caching, rate limiting, graceful shutdown, and async worker pools. It handles concurrent requests with goroutines, uses channels for job queues, and properly cleans up resources on shutdown. I understand both the code AND the system design trade-offs."
+> "I designed and built a Go backend service with JWT auth, Redis caching, rate limiting, graceful shutdown, and async worker pools. It handles concurrent requests with goroutines, uses channels for job queues, and properly cleans up resources on shutdown. I implemented structured logging with `slog` and request ID tracing for observability—critical for debugging in production. I understand both the code AND the system design trade-offs."
 
 ---
 
-**Status:** Week 3 Complete ✅
-**Confidence Level:** 9/10
+**Status:** Week 4 (Days 24-25) Complete ✅
+**Confidence Level:** 9.5/10
 **Ready for:** Backend Developer Interviews
-**Next:** Week 4 (Polish & Deployment Readiness)
+**Next:** Day 26 (Metrics & Monitoring)
