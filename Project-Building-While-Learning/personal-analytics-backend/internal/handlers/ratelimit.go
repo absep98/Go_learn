@@ -51,6 +51,38 @@ import (
 	"time"
 )
 
+// Global rate limit configuration (set from main)
+// Exported (capitalized) so main package can modify them
+//
+// === PACKAGE VISIBILITY & VARIABLE INITIALIZATION PATTERN ===
+//
+// Q: Why declare variables here with defaults instead of in main.go?
+// A: Variables must live in the package where they're USED.
+//
+// EXECUTION ORDER:
+// 1. Package Init: These variables are initialized with defaults (100, 1min)
+// 2. main() runs:  main.go loads config and OVERWRITES these values
+// 3. Middleware:   Uses the UPDATED values from config, not defaults
+//
+// Example:
+//   ratelimit.go:  var RateLimitRequests = 100  (initial default)
+//   main.go:       handlers.RateLimitRequests = 200  (overwrites with config)
+//   middleware:    IsAllowed(ip, RateLimitRequests, ...)  (uses 200, not 100!)
+//
+// KEY RULES:
+// 1. Variable Lives Where Used: RateLimitRequests declared in handlers package
+// 2. Same Package = Direct Access: Code here uses RateLimitRequests directly
+// 3. Cross-Package = Prefix: main.go uses handlers.RateLimitRequests
+// 4. Capitalization = Export: Capital letter makes it visible to other packages
+//
+// Why not declare in main.go?
+//   main package variables are invisible to handlers package (scope isolation)
+//
+var (
+	RateLimitRequests = 100        // Default: 100 requests
+	RateLimitWindow   = time.Minute // Default: 1 minute
+)
+
 func IsAllowed(key string, limit int, window time.Duration) bool {
 	// Prefix key to avoid conflicts with other Redis keys
 	redisKey := "ratelimit:" + key
@@ -85,8 +117,8 @@ func RateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		if err != nil {
 			ip = r.RemoteAddr
 		}
-		// 2. Check if allowed (100 requests per minute)
-		if !IsAllowed(ip, 100, time.Minute) {
+		// 2. Check if allowed (configured rate limit)
+		if !IsAllowed(ip, RateLimitRequests, RateLimitWindow) {
 			http.Error(w, "Rate limit exceeded. Try again later.", http.StatusTooManyRequests)
 			return // IMPORTANT: Stop here, don't call next handler
 		}

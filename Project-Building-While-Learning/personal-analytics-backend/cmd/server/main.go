@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"personal-analytics-backend/internal/config"
 	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/handlers"
 	"personal-analytics-backend/internal/logger"
 	"personal-analytics-backend/internal/redis"
 	"personal-analytics-backend/internal/worker"
-	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -37,6 +37,7 @@ import (
 		fmt.Fprintln(w, "ok")
 	}
 */
+
 func main() {
 	// ========================================
 	// STEP 0: Initialize structured logging FIRST
@@ -49,18 +50,34 @@ func main() {
 		slog.Warn("No .env file found")
 	}
 
-	// Initialize database
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "./data.db"
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
 	}
-	err = db.InitDB(dbPath)
+
+	slog.Info("Configuration loaded", "port", cfg.Port, "log_level", cfg.LogLevel)
+
+	// Apply rate limit configuration to handlers package
+	handlers.RateLimitRequests = cfg.RateLimitRequests
+	handlers.RateLimitWindow = cfg.RateLimitWindow
+	slog.Info("Rate limit configured", 
+		"requests_per_window", handlers.RateLimitRequests, 
+		"window_seconds", handlers.RateLimitWindow.Seconds())
+	
+	// Initialize database
+	// dbPath := os.Getenv("DB_PATH")
+	// if dbPath == "" {
+	// 	dbPath = "./data.db"
+	// }
+	err = db.InitDB(cfg.DBPath)
 	if err != nil {
 		slog.Error("Failed to initialize database", "error", err)
 		os.Exit(1)
 	}
 
-	err = redis.InitRedis("localhost:6379")
+	err = redis.InitRedis(cfg.RedisAddr)
 	if err != nil {
 		slog.Error("Failed to connect to Redis", "error", err)
 		os.Exit(1)
@@ -68,7 +85,7 @@ func main() {
 	defer redis.CloseRedis()
 
 	// Start background worker pool (3 workers)
-	worker.StartWorkerPool(3)
+	worker.StartWorkerPool(cfg.WorkerPoolSize)
 
 	// The "Defer" Magic: defer is a Go keyword that says: "Wait until this entire function (main) is finished, then immediately run this command."
 	defer db.CloseDB()
@@ -80,11 +97,6 @@ func main() {
 
 	// The Router htt.handleFunc tells go's default router "ServeMUX" the router
 	// if a request comes in for the path run the function
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
 
 	http.HandleFunc("/health", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.HealthHandler)))))
 	http.HandleFunc("/ping", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.PingHandler)))))
@@ -123,13 +135,13 @@ func main() {
 	// STEP 1: Create HTTP server (instead of just ListenAndServe)
 	// Why? So we can call server.Shutdown() later
 	server := &http.Server{
-		Addr: ":" + port,
+		Addr: ":" + cfg.Port,
 	}
 
 	// STEP 2: Start server in a GOROUTINE (background)
 	// Why? So main() doesn't block here and can listen for Ctrl+C
 	go func() {
-		slog.Info("Server starting", "port", port)
+		slog.Info("Server starting", "port", cfg.Port)
 		if err := server.ListenAndServe(); err != http.ErrServerClosed {
 			slog.Error("Server error", "error", err)
 			os.Exit(1)
@@ -151,13 +163,13 @@ func main() {
 
 	// STEP 6: Create a timeout context (max 5 seconds to finish)
 	// If requests take longer than 5 seconds, force close
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
 	// STEP 7: Gracefully shutdown the server
 	// - Stops accepting NEW requests
-	// - Waits for current requests to finish (up to 5 seconds)
-	slog.Info("Shutting down server", "timeout_seconds", 5)
+	// - Waits for current requests to finish
+	slog.Info("Shutting down server", "timeout_seconds", cfg.ShutdownTimeout.Seconds())
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("Server shutdown error", "error", err)
 	}

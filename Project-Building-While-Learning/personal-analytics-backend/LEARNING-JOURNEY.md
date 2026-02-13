@@ -809,6 +809,7 @@ func MetricsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 ```
 
 **Real metrics output:**
+
 ```json
 {
   "/health": {
@@ -823,6 +824,7 @@ func MetricsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 ```
 
 **Key concepts learned:**
+
 - Thread-safe maps with `sync.RWMutex` (multiple readers, exclusive writer)
 - ResponseWriter wrapper pattern to capture status codes
 - Atomic metrics aggregation (running sum instead of storing all values)
@@ -837,6 +839,7 @@ func MetricsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 **Initial confusion:** "How does middleware capture status when handler calls `w.WriteHeader(404)`?"
 
 **The solution:** Wrapper (spy) pattern
+
 ```go
 // Create wrapper that intercepts WriteHeader calls
 wrapped := &responseWriter{ResponseWriter: w, statusCode: 200}
@@ -853,6 +856,7 @@ next(wrapped, r)
 ```
 
 **Analogy that clicked:** Package delivery tracking
+
 - Without wrapper: Pizza delivered, you never know when it arrived
 - With wrapper: Smart doorbell records "Pizza arrived 2:30pm"
 - You check doorbell log later: "Oh, it arrived at 2:30pm!"
@@ -864,11 +868,13 @@ next(wrapped, r)
 **My initial thinking:** "Use `Lock()` to get perfectly consistent snapshot"
 
 **The real-world answer:** Use `RLock()` - here's why:
+
 - Metrics are approximate by nature (tiny inconsistency doesn't matter)
 - `Lock()` blocks incoming requests from recording metrics (bad!)
 - `RLock()` allows multiple `/metrics` readers simultaneously (good!)
 
 **Pattern learned:**
+
 ```go
 // Writing metrics (exclusive)
 m.mu.Lock()
@@ -888,6 +894,7 @@ m.mu.RUnlock()
 **Problem:** After 1 million requests = 1 million floats in memory! 💥
 
 **Solution:** Store aggregates only
+
 ```go
 totalLatency := 0.0
 requestCount := 0
@@ -901,6 +908,7 @@ avg := latency / float64(requestCount)
 ```
 
 **Tradeoff understood:**
+
 - Can't calculate percentiles (p99, p95) without full data
 - BUT: min/max/avg sufficient for most monitoring
 - Production uses histograms with fixed buckets for percentiles
@@ -910,6 +918,7 @@ avg := latency / float64(requestCount)
 **The question:** Where should MetricsMiddleware go in the chain?
 
 **Chain decision:**
+
 ```
 RequestID → Metrics → RateLimit → Logging → Auth → Handler
          ↑
@@ -917,6 +926,7 @@ RequestID → Metrics → RateLimit → Logging → Auth → Handler
 ```
 
 **Why second (not first, not last)?**
+
 - After RequestID: Metrics can include request_id in logs
 - Before everything else: Measures complete user experience (all middleware + handler)
 - NOT last: Would only measure handler time, miss middleware overhead
@@ -952,11 +962,13 @@ This taught me an important lesson: build what you need, not what you might need
 **The confusion:** "I don't understand the wrapper pattern at all—too many similar names WriteHeader and responseWriter"
 
 **The teaching approach:**
+
 1. Created `demo-wrapper.go` with simple example (spy recording status)
 2. Ran demo showing: without wrapper = blind, with wrapper = visible
 3. Showed exact flow: `Handler → wrapped.WriteHeader() → Save & Pass Through → Middleware checks saved value`
 
 **The breakthrough:** Understanding that wrapper is just a "recorder" sitting in the middle
+
 - Handler thinks it's calling normal ResponseWriter
 - Actually calling wrapper that saves data
 - Wrapper passes work to real ResponseWriter
@@ -964,16 +976,18 @@ This taught me an important lesson: build what you need, not what you might need
 
 **Confidence shift:** From "This makes no sense" to "Oh, it's just a middleman that records!" Understanding came from seeing it work, not just reading code.
 
-##Technical Capabilities After Day 26
+## Technical Capabilities After Day 26
 
 **New skills:**
+
 - Thread-safe data structures with `sync.RWMutex`
-- ResponseWriter wrapper pattern for intercepting HTTP responses  
+- ResponseWriter wrapper pattern for intercepting HTTP responses
 - Memory-efficient metric aggregation (running totals)
 - Middleware ordering for complete request lifecycle tracking
 - Production monitoring concepts (counters, gauges, latency percentiles)
 
 **Observability stack:**
+
 - ✅ JSON structured logs (parseable by ELK, CloudWatch)
 - ✅ Log levels (DEBUG/INFO/WARN/ERROR)
 - ✅ Request IDs (trace requests across services)
