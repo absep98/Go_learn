@@ -783,14 +783,208 @@ This taught me not to optimize prematurely. The simpler pattern (store ID, creat
 
 ---
 
+### Day 26: Metrics & Monitoring ✅
+
+**Implemented production-grade metrics system**
+
+```go
+// Thread-safe metrics collection per endpoint
+type Metrics struct {
+    mu sync.RWMutex
+    requestCount map[string]int64    // Total requests
+    errorCount   map[string]int64    // Errors (status >= 400)
+    inFlight     map[string]int64    // Currently processing
+    totalLatency map[string]float64  // Sum for average
+    minLatency   map[string]float64  // Fastest response
+    maxLatency   map[string]float64  // Slowest response
+}
+
+// Middleware records metrics for every request
+func MetricsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    wrapped := &responseWriter{ResponseWriter: w, statusCode: 200}
+    AppMetrics.RequestStarted(path)
+    next(wrapped, r)
+    AppMetrics.RequestCompleted(path, duration, wrapped.statusCode)
+}
+```
+
+**Real metrics output:**
+```json
+{
+  "/health": {
+    "total_requests": 3,
+    "errors": 0,
+    "in_flight": 0,
+    "avg_latency_ms": 4.33,
+    "min_latency_ms": 1,
+    "max_latency_ms": 8
+  }
+}
+```
+
+**Key concepts learned:**
+- Thread-safe maps with `sync.RWMutex` (multiple readers, exclusive writer)
+- ResponseWriter wrapper pattern to capture status codes
+- Atomic metrics aggregation (running sum instead of storing all values)
+- Memory-efficient metric tracking (no histogram, just min/max/avg)
+
+## Major Breakthroughs 💡
+
+### Breakthrough 1: The ResponseWriter Wrapper Pattern
+
+**The problem:** Middleware needs to know what status code handler sent
+
+**Initial confusion:** "How does middleware capture status when handler calls `w.WriteHeader(404)`?"
+
+**The solution:** Wrapper (spy) pattern
+```go
+// Create wrapper that intercepts WriteHeader calls
+wrapped := &responseWriter{ResponseWriter: w, statusCode: 200}
+
+// Handler receives wrapper instead of real ResponseWriter
+next(wrapped, r)
+
+// Handler calls: w.WriteHeader(404)
+// Actually calls: wrapped.WriteHeader(404)
+//   Which saves: wrapped.statusCode = 404
+//   Then calls: real ResponseWriter.WriteHeader(404)
+
+// Middleware checks: wrapped.statusCode // = 404!
+```
+
+**Analogy that clicked:** Package delivery tracking
+- Without wrapper: Pizza delivered, you never know when it arrived
+- With wrapper: Smart doorbell records "Pizza arrived 2:30pm"
+- You check doorbell log later: "Oh, it arrived at 2:30pm!"
+
+### Breakthrough 2: Thread-Safe Metrics (RWMutex vs Mutex)
+
+**The question:** Should `/metrics` endpoint use `Lock()` or `RLock()`?
+
+**My initial thinking:** "Use `Lock()` to get perfectly consistent snapshot"
+
+**The real-world answer:** Use `RLock()` - here's why:
+- Metrics are approximate by nature (tiny inconsistency doesn't matter)
+- `Lock()` blocks incoming requests from recording metrics (bad!)
+- `RLock()` allows multiple `/metrics` readers simultaneously (good!)
+
+**Pattern learned:**
+```go
+// Writing metrics (exclusive)
+m.mu.Lock()
+m.requestCount[path]++
+m.mu.Unlock()
+
+// Reading metrics (shared)
+m.mu.RLock()
+snapshot := m.requestCount[path]
+m.mu.RUnlock()
+```
+
+### Breakthrough 3: Memory-Efficient Latency Tracking
+
+**Initial design:** Store all latencies `[]float64{12.5, 15.3, 11.2, ...}`
+
+**Problem:** After 1 million requests = 1 million floats in memory! 💥
+
+**Solution:** Store aggregates only
+```go
+totalLatency := 0.0
+requestCount := 0
+
+// On each request:
+totalLatency += duration  // Running sum
+requestCount++           // Simple counter
+
+// Calculate average anytime:
+avg := latency / float64(requestCount)
+```
+
+**Tradeoff understood:**
+- Can't calculate percentiles (p99, p95) without full data
+- BUT: min/max/avg sufficient for most monitoring
+- Production uses histograms with fixed buckets for percentiles
+
+### Breakthrough 4: Middleware Ordering Logic
+
+**The question:** Where should MetricsMiddleware go in the chain?
+
+**Chain decision:**
+```
+RequestID → Metrics → RateLimit → Logging → Auth → Handler
+         ↑
+    Metrics goes HERE (second)
+```
+
+**Why second (not first, not last)?**
+- After RequestID: Metrics can include request_id in logs
+- Before everything else: Measures complete user experience (all middleware + handler)
+- NOT last: Would only measure handler time, miss middleware overhead
+
+## Interview-Ready Stories (Day 26)
+
+### Story 1: "Building a Metrics System from Scratch"
+
+"I implemented a custom metrics system for my Go backend to track request counts, error rates, and latency per endpoint. The challenge was thread-safety—with hundreds of concurrent requests, I needed to protect shared maps from race conditions.
+
+I used `sync.RWMutex` which allows multiple simultaneous readers but exclusive writers. This lets multiple `/metrics` requests read data concurrently while request handlers update metrics. It's a classic reader-writer lock pattern optimized for read-heavy workloads.
+
+For latency tracking, I initially considered storing all response times, but realized that's a memory leak—1 million requests = 8MB just for latencies! Instead, I track running totals: sum of durations, min, max, and count. Average is `sum/count`, no memory explosion. Production systems use histogram buckets for percentiles, but for learning, aggregates are sufficient."
+
+### Story 2: "The ResponseWriter Wrapper Pattern"
+
+"One tricky problem was: how does middleware know what HTTP status code the handler sent? The handler calls `w.WriteHeader(404)` deep inside its logic, but middleware wraps the handler and returns before that call happens.
+
+The solution is a wrapper pattern—I created a custom `responseWriter` struct that embeds `http.ResponseWriter` and overrides the `WriteHeader` method. When the handler calls `WriteHeader`, it's actually calling my wrapper's method, which saves the status code, then delegates to the real ResponseWriter.
+
+It's like a 'spy' that intercepts calls. This pattern is common in Go for capturing response data (status codes, byte counts) that middleware needs but handlers control. Libraries like `httptest.ResponseRecorder` use the same technique."
+
+### Story 3: "Production Metrics vs Learning Metrics"
+
+"My metrics system tracks per-endpoint request counts, error rates, and latency (min/max/avg). It's thread-safe and memory-efficient. But in production, I'd use Prometheus with histograms to track percentiles (p50, p95, p99).
+
+Why didn't I build that? Because premature optimization kills learning. My system solves the core problems: thread-safety, memory efficiency, and understanding the ownership/lifecycle of metrics data. If I need percentiles later, I can add histogram buckets—but for now, averages + min/max give 90% of the value for 10% of the complexity.
+
+This taught me an important lesson: build what you need, not what you might need. Start simple, add complexity only when justified."
+
+## Confidence Crisis & Recovery (Day 26) 🧘
+
+**The confusion:** "I don't understand the wrapper pattern at all—too many similar names WriteHeader and responseWriter"
+
+**The teaching approach:**
+1. Created `demo-wrapper.go` with simple example (spy recording status)
+2. Ran demo showing: without wrapper = blind, with wrapper = visible
+3. Showed exact flow: `Handler → wrapped.WriteHeader() → Save & Pass Through → Middleware checks saved value`
+
+**The breakthrough:** Understanding that wrapper is just a "recorder" sitting in the middle
+- Handler thinks it's calling normal ResponseWriter
+- Actually calling wrapper that saves data
+- Wrapper passes work to real ResponseWriter
+- Middleware checks wrapper's saved data later
+
+**Confidence shift:** From "This makes no sense" to "Oh, it's just a middleman that records!" Understanding came from seeing it work, not just reading code.
+
+##Technical Capabilities After Day 26
+
+**New skills:**
+- Thread-safe data structures with `sync.RWMutex`
+- ResponseWriter wrapper pattern for intercepting HTTP responses  
+- Memory-efficient metric aggregation (running totals)
+- Middleware ordering for complete request lifecycle tracking
+- Production monitoring concepts (counters, gauges, latency percentiles)
+
+**Observability stack:**
+- ✅ JSON structured logs (parseable by ELK, CloudWatch)
+- ✅ Log levels (DEBUG/INFO/WARN/ERROR)
+- ✅ Request IDs (trace requests across services)
+- ✅ Metrics endpoint (request counts, errors, latency per endpoint)
+- ⏳ Configuration management (Day 27-28)
+
+---
+
 # Week 4 Plan (Continued)
 
-**Day 26-27: Metrics & Monitoring**
-
-- Add `/metrics` endpoint
-- Track request counts, response times
-- Prometheus-style metrics format
-- Understand observability basics
+**Day 27-28: Configuration & Environment**
 
 **Day 28-29: Configuration & Environment**
 
@@ -815,9 +1009,9 @@ This taught me not to optimize prematurely. The simpler pattern (store ID, creat
 **Week 1:** HTTP server, SQLite, CRUD, validation, security fundamentals
 **Week 2:** JWT auth, middleware, protected routes, testing
 **Week 3:** Pagination, caching, rate limiting, Redis, graceful shutdown, worker pools
-**Week 4:** Structured logging (`slog`), request IDs, distributed tracing, observability patterns
+**Week 4:** Structured logging (`slog`), request IDs, distributed tracing, metrics system with thread-safe tracking
 
-**Total:** Production-ready backend with auth, caching, rate limiting, background processing, structured logging, and request tracing.
+**Total:** Production-ready backend with auth, caching, rate limiting, background processing, structured logging, request tracing, and real-time metrics.
 
 ## Confidence Trajectory
 
@@ -826,7 +1020,7 @@ Week 0: 3/10 (Just SDET, scared of backend)
 Week 1: 7/10 (Can build CRUD, understand security)
 Week 2: 9/10 (Can implement auth, explain systems)
 Week 3: 9/10 (Can scale systems, use Redis, goroutines)
-Week 4: 9.5/10 (Can implement observability, debug systematically, benchmark performance)
+Week 4: 9.5/10 (Can implement observability: logs, traces, metrics; understand thread-safety patterns)
 ```
 
 ---
@@ -841,15 +1035,15 @@ This shifted my thinking from "I should know everything" to "I should understand
 
 # Final Achievement Statement
 
-**In 4 weeks, I built a production-ready backend** with JWT authentication, CRUD operations, pagination, Redis caching, rate limiting, graceful shutdown, background worker pools, structured logging, and distributed request tracing.
+**In 4 weeks, I built a production-ready backend** with JWT authentication, CRUD operations, pagination, Redis caching, rate limiting, graceful shutdown, background worker pools, structured logging, distributed request tracing, and real-time metrics monitoring.
 
 **I can confidently say in interviews:**
 
-> "I designed and built a Go backend service with JWT auth, Redis caching, rate limiting, graceful shutdown, and async worker pools. It handles concurrent requests with goroutines, uses channels for job queues, and properly cleans up resources on shutdown. I implemented structured logging with `slog` and request ID tracing for observability—critical for debugging in production. I understand both the code AND the system design trade-offs."
+> "I designed and built a Go backend service with JWT auth, Redis caching, rate limiting, graceful shutdown, and async worker pools. It handles concurrent requests with goroutines, uses channels for job queues, and properly cleans up resources on shutdown. I implemented the complete observability triad: structured logging with `slog`, request ID tracing, and a custom metrics system tracking request counts, error rates, and latency per endpoint. I understand thread-safety patterns (RWMutex), middleware design patterns (wrapper/interceptor), and the trade-offs between simplicity and production-grade features."
 
 ---
 
-**Status:** Week 4 (Days 24-25) Complete ✅
+**Status:** Week 4 (Days 24-26) Complete ✅
 **Confidence Level:** 9.5/10
 **Ready for:** Backend Developer Interviews
-**Next:** Day 26 (Metrics & Monitoring)
+**Next:** Day 27-28 (Configuration Management)
