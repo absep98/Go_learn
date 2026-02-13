@@ -86,16 +86,16 @@ func main() {
 		port = "8080"
 	}
 
-	http.HandleFunc("/health", handlers.RequestIDMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.HealthHandler))))
-	http.HandleFunc("/ping", handlers.RequestIDMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.PingHandler))))
+	http.HandleFunc("/health", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.HealthHandler)))))
+	http.HandleFunc("/ping", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.PingHandler)))))
 
 	// Auth endpoints (no protection needed)
-	http.HandleFunc("/register", handlers.RequestIDMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Register))))
-	http.HandleFunc("/login", handlers.RequestIDMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Login))))
+	http.HandleFunc("/register", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Register)))))
+	http.HandleFunc("/login", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Login)))))
 
 	// Entries endpoints (PROTECTED - requires authentication)
 	http.HandleFunc("/entries", handlers.RequestIDMiddleware(
-		handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
+		handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
 			handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPost {
 					handlers.CreateEntry(w, r)
@@ -110,7 +110,11 @@ func main() {
 				} else {
 					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				}
-			})))))
+			}))))))
+
+	http.HandleFunc("/metrics", handlers.RequestIDMiddleware(
+		handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
+			handlers.LoggingMiddleware(handlers.GetMetrics)))))
 
 	// ========================================
 	// GRACEFUL SHUTDOWN IMPLEMENTATION

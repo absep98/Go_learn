@@ -595,12 +595,14 @@ slog.Info("User logged in", "user_id", userID)
 ```
 
 **Why this matters:**
+
 - JSON output that log aggregators (ELK, CloudWatch) can parse
 - Log levels (DEBUG, INFO, WARN, ERROR) for filtering
 - Structured fields instead of string concatenation
 - Performance: efficient field serialization
 
 **Key concepts learned:**
+
 - `slog.Default()` for global logger
 - `slog.SetLogLoggerLevel()` for filtering
 - Structured attributes with key-value pairs
@@ -654,6 +656,7 @@ func GetLoggerWithRequestID(r *http.Request) *slog.Logger {
 **The answer:** No! ~60 nanoseconds per call (16,000x faster than a DB query).
 
 **The pattern:**
+
 ```go
 logger := slog.Default().With("request_id", id)
 // Creates a CHILD logger that remembers the request_id
@@ -667,6 +670,7 @@ logger := slog.Default().With("request_id", id)
 **Initial confusion:** "How is logger updating slog.Info? I'm not seeing we're putting logger in slog.Info"
 
 **The revelation:**
+
 - `slog.Info()` uses the GLOBAL default logger (no context)
 - `slog.Default().With()` creates a NEW child logger object
 - Must use `logger.Info()` not `slog.Info()` to get the context
@@ -684,6 +688,7 @@ logger.Info("Entry created")
 ### Breakthrough 3: Middleware Ordering Matters
 
 **The flow:**
+
 ```
 Request arrives
     ↓
@@ -715,6 +720,7 @@ Handler (all logs include request_id)
 **Verdict:** Negligible overhead. Even logging 100 times per request = 6 microseconds total.
 
 **Alternative considered:** Store logger in context instead of request_id. But:
+
 - More complex code
 - Premature optimization
 - Saves only ~40ns per call
@@ -747,6 +753,7 @@ This taught me not to optimize prematurely. The simpler pattern (store ID, creat
 **The confusion:** "I created logger but code still logs to slog.Info()—how does it work?"
 
 **The debugging process:**
+
 1. Read the code carefully: `logger := GetLoggerWithRequestID(r)` creates child logger
 2. But then: `slog.Info("...")` uses GLOBAL logger (ignores `logger` variable!)
 3. Fix: Change to `logger.Info("...")` to use child logger
@@ -758,6 +765,7 @@ This taught me not to optimize prematurely. The simpler pattern (store ID, creat
 ## Technical Capabilities After Week 4 (Partial)
 
 **New skills:**
+
 - Structured logging with `slog` package
 - Request tracing with unique IDs
 - Context propagation patterns
@@ -766,6 +774,7 @@ This taught me not to optimize prematurely. The simpler pattern (store ID, creat
 - Performance benchmarking mental models
 
 **Observability stack:**
+
 - ✅ JSON structured logs (parseable by ELK, CloudWatch)
 - ✅ Log levels (DEBUG/INFO/WARN/ERROR)
 - ✅ Request IDs (trace requests across services)
