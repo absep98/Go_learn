@@ -32,6 +32,9 @@ type Config struct {
 
 	// WorkerPoolSize
 	WorkerPoolSize int
+
+	// RequestTimeout - max time a request can take before 504
+	RequestTimeout time.Duration
 }
 
 func Load() (*Config, error) {
@@ -105,5 +108,13 @@ func Load() (*Config, error) {
 
 	}
 	cfg.WorkerPoolSize = workerPoolSize
+
+	// Load RequestTimeout
+	reqTimeout, err := strconv.Atoi(os.Getenv("REQUEST_TIMEOUT"))
+	if err != nil || reqTimeout == 0 {
+		reqTimeout = 10 // Default: 10 seconds
+	}
+	cfg.RequestTimeout = time.Duration(reqTimeout) * time.Second
+
 	return cfg, nil
 }

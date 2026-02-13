@@ -3,6 +3,8 @@ package redis
 import (
 	"context"
 	"log/slog"
+	"personal-analytics-backend/internal/retry"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -15,8 +17,12 @@ func InitRedis(addr string) error {
 		Addr: addr,
 	})
 
-	// Test connection
-	_, err := Client.Ping(context.Background()).Result()
+	// Test connection with retry (Redis might still be starting up)
+	// 3 attempts, starting with 500ms delay (500ms → 1s → 2s)
+	err := retry.Do(3, 500*time.Millisecond, func() error {
+		_, err := Client.Ping(context.Background()).Result()
+		return err
+	})
 	if err != nil {
 		return err
 	}

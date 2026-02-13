@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"personal-analytics-backend/internal/cache"
 	"personal-analytics-backend/internal/config"
 	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/handlers"
@@ -65,6 +66,9 @@ func main() {
 	slog.Info("Rate limit configured", 
 		"requests_per_window", handlers.RateLimitRequests, 
 		"window_seconds", handlers.RateLimitWindow.Seconds())
+
+	// Apply request timeout configuration
+	handlers.RequestTimeout = cfg.RequestTimeout
 	
 	// Initialize database
 	// dbPath := os.Getenv("DB_PATH")
@@ -98,16 +102,27 @@ func main() {
 	// The Router htt.handleFunc tells go's default router "ServeMUX" the router
 	// if a request comes in for the path run the function
 
-	http.HandleFunc("/health", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.HealthHandler)))))
-	http.HandleFunc("/ping", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.PingHandler)))))
+	// Middleware chain order (outside → inside):
+	// RequestID → Timeout → Metrics → RateLimit → Logging → [Auth] → Handler
+	//
+	// Why this order?
+	// 1. RequestID first: all downstream logs include request_id
+	// 2. Timeout second: kills requests that take too long (protects server)
+	// 3. Metrics third: tracks all requests including timeouts
+	// 4. RateLimit: prevents abuse before doing expensive work
+	// 5. Logging: logs request details
+	// 6. Auth: validates JWT (only on protected routes)
+
+	http.HandleFunc("/health", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.HealthHandler))))))
+	http.HandleFunc("/ping", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.PingHandler))))))
 
 	// Auth endpoints (no protection needed)
-	http.HandleFunc("/register", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Register)))))
-	http.HandleFunc("/login", handlers.RequestIDMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Login)))))
+	http.HandleFunc("/register", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Register))))))
+	http.HandleFunc("/login", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Login))))))
 
 	// Entries endpoints (PROTECTED - requires authentication)
 	http.HandleFunc("/entries", handlers.RequestIDMiddleware(
-		handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
+		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
 			handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPost {
 					handlers.CreateEntry(w, r)
@@ -122,11 +137,11 @@ func main() {
 				} else {
 					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				}
-			}))))))
+			})))))))
 
 	http.HandleFunc("/metrics", handlers.RequestIDMiddleware(
-		handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
-			handlers.LoggingMiddleware(handlers.GetMetrics)))))
+		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
+			handlers.LoggingMiddleware(handlers.GetMetrics))))))
 
 	// ========================================
 	// GRACEFUL SHUTDOWN IMPLEMENTATION
@@ -174,7 +189,8 @@ func main() {
 		slog.Error("Server shutdown error", "error", err)
 	}
 
-	// STEP 8: Close connections (defer will handle this, but log it)
+	// STEP 8: Stop background goroutines and close connections
+	cache.AppCache.StopCleanup() // Stop cache cleanup goroutine
 	slog.Info("Closing connections", "redis", "closing", "database", "closing")
 	slog.Info("Server stopped gracefully")
 }
