@@ -992,7 +992,333 @@ This taught me an important lesson: build what you need, not what you might need
 - ✅ Log levels (DEBUG/INFO/WARN/ERROR)
 - ✅ Request IDs (trace requests across services)
 - ✅ Metrics endpoint (request counts, errors, latency per endpoint)
-- ⏳ Configuration management (Day 27-28)
+- ✅ Configuration management (Day 27-28)
+
+---
+
+### Day 27-28: Centralized Configuration Management ✅
+
+**Implemented 12-Factor App configuration pattern**
+
+```go
+// internal/config/config.go
+type Config struct {
+    Port            string
+    DBPath          string
+    RedisAddr       string
+    JWTSecret       string
+    LogLevel        string
+    ShutdownTimeout time.Duration
+    RateLimitRequests int
+    RateLimitWindow time.Duration
+    WorkerPoolSize  int
+}
+
+func Load() (*Config, error) {
+    // Load from environment with defaults
+    cfg := &Config{
+        Port:            getEnv("PORT", "8080"),
+        DBPath:          getEnv("DB_PATH", "./data.db"),
+        RedisAddr:       getEnv("REDIS_HOST", "localhost") + ":" + getEnv("REDIS_PORT", "6379"),
+        JWTSecret:       os.Getenv("JWT_SECRET"),
+        LogLevel:        getEnv("LOG_LEVEL", "info"),
+        ShutdownTimeout: getDuration("SHUTDOWN_TIMEOUT", 5) * time.Second,
+        RateLimitRequests: getInt("RATE_LIMIT_REQUESTS", 100),
+        RateLimitWindow: getDuration("RATE_LIMIT_WINDOW", 60) * time.Second,
+        WorkerPoolSize:  getInt("WORKERPOOL_SIZE", 3),
+    }
+    
+    // Validate critical configuration
+    if cfg.JWTSecret == "" {
+        return nil, fmt.Errorf("JWT_SECRET environment variable is required")
+    }
+    
+    return cfg, nil
+}
+```
+
+**Before vs After:**
+
+```go
+// ❌ Before: Scattered hardcoded values
+port := os.Getenv("PORT")
+if port == "" {
+    port = "8080"  // Hardcoded in main.go
+}
+// Rate limit: hardcoded in ratelimit.go
+if !IsAllowed(ip, 100, time.Minute)
+
+// Worker pool: hardcoded in main.go
+worker.StartWorkerPool(3)
+
+// ✅ After: Single source of truth
+cfg, err := config.Load()
+if err != nil {
+    slog.Error("Failed to load configuration", "error", err)
+    os.Exit(1)  // Fail fast on misconfiguration
+}
+
+// All values from config
+handlers.RateLimitRequests = cfg.RateLimitRequests
+worker.StartWorkerPool(cfg.WorkerPoolSize)
+```
+
+**Environment variables (.env):**
+
+```env
+PORT=8080
+DB_PATH=./data.db
+REDIS_HOST=localhost
+REDIS_PORT=6379
+JWT_SECRET=my-super-secret-key-change-in-production
+LOG_LEVEL=info
+SHUTDOWN_TIMEOUT=5
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW=60
+WORKERPOOL_SIZE=3
+```
+
+**Key concepts learned:**
+
+- 12-Factor App: Configuration in environment (not code)
+- Fail-fast validation (JWT_SECRET required on startup)
+- Sensible defaults for development convenience
+- Type-safe config with `time.Duration` and proper int conversion
+- Single initialization point (`config.Load()`)
+
+## Major Breakthroughs 💡
+
+### Breakthrough 1: Package Visibility & Variable Initialization Pattern
+
+**The confusion:** "Why declare variables in `ratelimit.go` with defaults if config overwrites them?"
+
+**The execution order revelation:**
+
+```
+Program Start
+    ↓
+1. Package Init: handlers.RateLimitRequests = 100 (default)
+    ↓
+2. main() runs: config.Load() reads .env (value = 200)
+    ↓
+3. main() sets: handlers.RateLimitRequests = 200 (OVERWRITES default!)
+    ↓
+Server runs: Middleware uses 200, not 100!
+```
+
+**The key insight:** Variables must live in the package where they're USED
+
+```go
+// ❌ Wrong: Can't access main package variables from handlers
+// main.go
+var rateLimitRequests = 100  
+// handlers/ratelimit.go
+IsAllowed(ip, rateLimitRequests, ...)  // ❌ Can't see main.rateLimitRequests!
+
+// ✅ Correct: Export from handlers, set from main
+// handlers/ratelimit.go
+var RateLimitRequests = 100  // Default (fallback)
+// main.go
+handlers.RateLimitRequests = cfg.RateLimitRequests  // Overwrites default
+// handlers/ratelimit.go
+IsAllowed(ip, RateLimitRequests, ...)  // Uses updated value!
+```
+
+**Package visibility rules learned:**
+
+1. **Variable lives where used:** Declare in handlers package (where middleware needs it)
+2. **Same package = direct access:** Code in handlers uses `RateLimitRequests` directly
+3. **Cross-package = prefix required:** Code in main uses `handlers.RateLimitRequests`
+4. **Capitalization = export:** Capital letter makes it visible to other packages
+
+**Analogy that clicked:** Spare tire in car trunk
+
+- Car comes with spare tire (default: 100)
+- You swap it with better tire from garage (config: 200)
+- You drive with better tire, not the spare!
+- Spare only used if garage tire doesn't exist
+
+### Breakthrough 2: Fail-Fast Configuration Validation
+
+**The question:** "Should we allow server to start with missing JWT_SECRET?"
+
+**The answer:** No! Fail immediately with clear error message
+
+```go
+func Load() (*Config, error) {
+    cfg := &Config{...}
+    
+    // Critical validation
+    if cfg.JWTSecret == "" {
+        return nil, fmt.Errorf("JWT_SECRET environment variable is required but not set")
+    }
+    
+    return cfg, nil
+}
+
+// In main.go
+cfg, err := config.Load()
+if err != nil {
+    slog.Error("Failed to load configuration", "error", err)
+    os.Exit(1)  // Stop immediately, don't start broken server
+}
+```
+
+**Why fail-fast?**
+
+- Starting server without JWT_SECRET = all auth endpoints broken
+- Better to crash on startup than accept requests that fail mysteriously
+- Clear error message helps debug deployment issues
+- "If it's going to fail, fail loud and early"
+
+### Breakthrough 3: Type-Safe Configuration
+
+**Initial mistake:** Storing durations as strings
+
+```go
+// ❌ Wrong: String requires parsing everywhere
+shutdownTimeout := "5"  // seconds? milliseconds? unclear!
+// Later: Need to parse every time used
+timeout, _ := strconv.Atoi(shutdownTimeout)
+ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout) * time.Second)
+
+// ✅ Correct: Parse once in config.Load()
+cfg.ShutdownTimeout = time.Duration(timeout) * time.Second  // Already typed!
+// Later: Use directly
+ctx, cancel := context.WithTimeout(ctx, cfg.ShutdownTimeout)
+```
+
+**Type conversion helpers:**
+
+```go
+func getInt(key string, defaultVal int) int {
+    if val := os.Getenv(key); val != "" {
+        if parsed, err := strconv.Atoi(val); err == nil {
+            return parsed
+        }
+    }
+    return defaultVal
+}
+
+func getDuration(key string, defaultVal int) time.Duration {
+    return time.Duration(getInt(key, defaultVal))
+}
+```
+
+**Benefits:**
+
+- Convert once at startup (not on every use)
+- Type safety catches errors at config load (not at runtime)
+- Clear intention: `time.Duration` vs int vs string
+- Compiler helps: can't pass string where Duration expected
+
+### Breakthrough 4: 12-Factor App Principles
+
+**What I learned:**
+
+1. **Store config in environment, not code**
+   - Hardcoded = recompile to change
+   - Environment = change without rebuild
+
+2. **Sensible defaults for development**
+   - `PORT=8080` not required locally
+   - `JWT_SECRET` REQUIRED (security critical)
+
+3. **One codebase, many deploys**
+   - Same code runs dev/staging/prod
+   - Only environment variables differ
+
+4. **Configuration validation on startup**
+   - Missing critical config = fail immediately
+   - Don't start broken services
+
+**Real-world example:**
+
+```bash
+# Development
+JWT_SECRET=dev-secret go run ./cmd/server
+
+# Staging
+JWT_SECRET=staging-xyz... PORT=8081 go run ./cmd/server
+
+# Production
+JWT_SECRET=$PROD_SECRET PORT=443 REDIS_HOST=prod-redis.internal go run ./cmd/server
+```
+
+Same binary, different behavior through environment!
+
+## Interview-Ready Stories (Days 27-28)
+
+### Story 1: "Centralized Configuration Management"
+
+"I refactored my backend to follow 12-Factor App principles by moving all configuration to environment variables. Previously, I had hardcoded values scattered across multiple files—rate limits in middleware, worker pool size in main, timeouts in various places.
+
+I created a centralized `config` package with a single `Load()` function that reads all environment variables, provides sensible defaults, and validates critical values like JWT_SECRET. If configuration is invalid, the server fails immediately on startup with a clear error message.
+
+This fail-fast approach is crucial—starting a server with missing JWT_SECRET means all authentication endpoints are broken. Better to crash on startup than accept requests that mysteriously fail. In production, this makes deployment issues obvious immediately rather than causing silent failures."
+
+### Story 2: "Package Visibility Pattern in Go"
+
+"When implementing configuration, I hit an interesting Go package visibility challenge. My rate limit middleware needed configurable values, but I initially tried declaring variables in the main package. That doesn't work—handlers package can't access main package variables due to Go's scope isolation.
+
+The solution: declare variables in the handlers package where they're used, not where they're set. The variables start with sensible defaults (100 requests per minute), then main.go overwrites them after loading config. It's like a spare tire—car has default, you swap it before driving.
+
+This taught me an important Go pattern: exported variables (capital letter) can be read and written across packages, but must live in the package where they're primarily used. Same package = direct access, cross-package = prefix required."
+
+### Story 3: "Type-Safe Configuration Loading"
+
+"I implemented type-safe configuration by parsing environment variables once at startup rather than everywhere they're used. For example, shutdown timeout comes from environment as a string '5', but I convert it to `time.Duration` during config loading.
+
+This means the rest of my codebase uses strongly-typed values, not strings. The compiler catches type errors, and I don't have messy strconv.Atoi calls scattered throughout. If a value can't be parsed, config loading fails immediately with clear error messages.
+
+This is a form of defensive programming—validate and convert at the boundary (environment → config), then work with safe types internally. It's cheaper to validate once at startup than risk runtime parsing errors in hot code paths."
+
+## Confidence Growth (Days 27-28) 📈
+
+**Initial confusion:** "Why define default values if config overwrites them?"
+
+**Debugging process:**
+
+1. Ran server with logging to see actual values loaded
+2. Changed .env from 100 to 200, saw logs reflect new value
+3. Realized: defaults are "fallback", config is "override"
+4. Drew execution timeline showing package init → main() → server running
+
+**Understanding achieved:** Variables need defaults for:
+
+- Fallback if environment variable not set
+- Development convenience (don't need .env for quick testing)
+- Clear intention (shows what values are expected)
+
+**Confidence shift:** From "This seems redundant" to "This is defensive design—graceful degradation with sensible defaults!"
+
+## Technical Capabilities After Days 27-28
+
+**New skills:**
+
+- 12-Factor App configuration patterns
+- Environment variable management with godotenv
+- Configuration validation (fail-fast on missing critical values)
+- Type-safe config loading (parse once, use typed values)
+- Package visibility patterns (export from usage package, set from main)
+- Cross-package variable modification in Go
+
+**Configuration system:**
+
+- ✅ All config from environment variables (not hardcoded)
+- ✅ Single source of truth (`config.Load()`)
+- ✅ Sensible defaults for development
+- ✅ Validation on startup (JWT_SECRET required)
+- ✅ Type-safe values (`time.Duration`, `int`, not strings)
+- ✅ Clear error messages for misconfiguration
+
+**Observability + Configuration stack:**
+
+- ✅ Structured logging with `slog`
+- ✅ Request ID tracing
+- ✅ Metrics endpoint
+- ✅ Centralized configuration
+- ✅ Fail-fast validation
 
 ---
 
@@ -1023,9 +1349,9 @@ This taught me an important lesson: build what you need, not what you might need
 **Week 1:** HTTP server, SQLite, CRUD, validation, security fundamentals
 **Week 2:** JWT auth, middleware, protected routes, testing
 **Week 3:** Pagination, caching, rate limiting, Redis, graceful shutdown, worker pools
-**Week 4:** Structured logging (`slog`), request IDs, distributed tracing, metrics system with thread-safe tracking
+**Week 4:** Structured logging (`slog`), request IDs, distributed tracing, metrics system with thread-safe tracking, centralized configuration management
 
-**Total:** Production-ready backend with auth, caching, rate limiting, background processing, structured logging, request tracing, and real-time metrics.
+**Total:** Production-ready backend with auth, caching, rate limiting, background processing, structured logging, request tracing, real-time metrics, and 12-Factor App configuration.
 
 ## Confidence Trajectory
 
@@ -1034,7 +1360,7 @@ Week 0: 3/10 (Just SDET, scared of backend)
 Week 1: 7/10 (Can build CRUD, understand security)
 Week 2: 9/10 (Can implement auth, explain systems)
 Week 3: 9/10 (Can scale systems, use Redis, goroutines)
-Week 4: 9.5/10 (Can implement observability: logs, traces, metrics; understand thread-safety patterns)
+Week 4: 9.5/10 (Can implement observability: logs, traces, metrics; understand thread-safety patterns; implement production-grade configuration)
 ```
 
 ---
@@ -1049,15 +1375,15 @@ This shifted my thinking from "I should know everything" to "I should understand
 
 # Final Achievement Statement
 
-**In 4 weeks, I built a production-ready backend** with JWT authentication, CRUD operations, pagination, Redis caching, rate limiting, graceful shutdown, background worker pools, structured logging, distributed request tracing, and real-time metrics monitoring.
+**In 4 weeks, I built a production-ready backend** with JWT authentication, CRUD operations, pagination, Redis caching, rate limiting, graceful shutdown, background worker pools, structured logging, distributed request tracing, real-time metrics monitoring, and 12-Factor App configuration management.
 
 **I can confidently say in interviews:**
 
-> "I designed and built a Go backend service with JWT auth, Redis caching, rate limiting, graceful shutdown, and async worker pools. It handles concurrent requests with goroutines, uses channels for job queues, and properly cleans up resources on shutdown. I implemented the complete observability triad: structured logging with `slog`, request ID tracing, and a custom metrics system tracking request counts, error rates, and latency per endpoint. I understand thread-safety patterns (RWMutex), middleware design patterns (wrapper/interceptor), and the trade-offs between simplicity and production-grade features."
+> "I designed and built a Go backend service with JWT auth, Redis caching, rate limiting, graceful shutdown, and async worker pools. It handles concurrent requests with goroutines, uses channels for job queues, and properly cleans up resources on shutdown. I implemented the complete observability stack: structured logging with `slog`, request ID tracing, and a custom metrics system tracking request counts, error rates, and latency per endpoint. I follow 12-Factor App principles with centralized configuration, fail-fast validation, and environment-based deployment. I understand thread-safety patterns (RWMutex), middleware design patterns (wrapper/interceptor), package visibility in Go, and the trade-offs between simplicity and production-grade features."
 
 ---
 
-**Status:** Week 4 (Days 24-26) Complete ✅
+**Status:** Week 4 (Days 24-28) Complete ✅
 **Confidence Level:** 9.5/10
 **Ready for:** Backend Developer Interviews
-**Next:** Day 27-28 (Configuration Management)
+**Next:** Day 29-30 (Final Documentation & Polish)
