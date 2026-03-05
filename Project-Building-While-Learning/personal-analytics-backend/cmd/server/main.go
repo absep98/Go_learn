@@ -63,13 +63,13 @@ func main() {
 	// Apply rate limit configuration to handlers package
 	handlers.RateLimitRequests = cfg.RateLimitRequests
 	handlers.RateLimitWindow = cfg.RateLimitWindow
-	slog.Info("Rate limit configured", 
-		"requests_per_window", handlers.RateLimitRequests, 
+	slog.Info("Rate limit configured",
+		"requests_per_window", handlers.RateLimitRequests,
 		"window_seconds", handlers.RateLimitWindow.Seconds())
 
 	// Apply request timeout configuration
 	handlers.RequestTimeout = cfg.RequestTimeout
-	
+
 	// Initialize database
 	// dbPath := os.Getenv("DB_PATH")
 	// if dbPath == "" {

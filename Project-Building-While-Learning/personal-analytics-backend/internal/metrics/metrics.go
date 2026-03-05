@@ -94,3 +94,56 @@ func (m *Metrics) GetSnapshot() map[string]interface{} {
 	}
 	return result
 }
+
+/*
+=== INTERVIEW ANSWER: METRICS SYSTEM ===
+
+WHAT:
+Per-endpoint observability: request count, error count, inflight requests,
+and latency stats (avg/min/max). Exposed via /metrics endpoint as a snapshot.
+
+WHY:
+Without metrics you're flying blind. You can't know which endpoints are slow,
+which are erroring, or how many requests are currently in-flight. Metrics let
+you detect problems before users complain.
+
+HOW:
+Metrics struct holds maps keyed by endpoint path:
+- requestCount: total completed requests per endpoint
+- errorCount: responses with status >= 400
+- inFlight: requests currently being processed (gauge: goes up and down)
+- totalLatency: sum of all durations (used to calculate average)
+- minLatency / maxLatency: fastest and slowest request seen
+
+MIDDLEWARE FLOW:
+1. RequestStarted(path): Lock() → inFlight[path]++ → Unlock()
+2. Record start time: time.Now()
+3. Wrap ResponseWriter to intercept WriteHeader() and save status code
+   (http.ResponseWriter cannot be read back after writing — wrapper is required)
+4. Call next handler with wrapped writer
+5. RequestCompleted(path, duration, statusCode):
+   Lock() → inFlight-- → requestCount++ → if status>=400: errorCount++
+   → update totalLatency, minLatency, maxLatency → Unlock()
+
+WHY RESPONSEWRITER WRAPPER:
+Once a handler calls w.WriteHeader(201), that status goes to the client and
+cannot be retrieved from the original ResponseWriter. The wrapper struct embeds
+http.ResponseWriter, overrides WriteHeader() to capture the code in a field,
+then passes through to the real writer. After next() returns, wrapped.statusCode
+has the actual status written by the handler.
+
+RWMUTEX — READ vs WRITE LOCK:
+- Lock() (write): exclusive. One goroutine at a time. Blocks readers AND writers.
+  Used by RequestStarted and RequestCompleted — they modify maps.
+- RLock() (read): shared. Multiple goroutines can hold simultaneously.
+  Used by GetSnapshot — only reads, never modifies.
+  Practical benefit: 10 concurrent /metrics calls don't block each other or
+  block incoming requests from updating counters.
+
+RULE: modifying data → Lock(). reading only → RLock().
+
+TRADE-OFFS:
+- In-memory only — reset on server restart
+- No percentiles (p95/p99) — production uses Prometheus histograms
+- Single global AppMetrics var — fine for one server, won't aggregate across fleet
+*/

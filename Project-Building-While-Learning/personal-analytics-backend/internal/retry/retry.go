@@ -51,6 +51,43 @@ import (
 	"time"
 )
 
+/*
+=== INTERVIEW ANSWER: RETRY WITH EXPONENTIAL BACKOFF ===
+
+WHAT:
+Retry handles temporary failures — network blip, service briefly overloaded,
+container still starting. Instead of failing immediately, try again a few times
+before giving up. Key word: TEMPORARY. Never retry permanent errors (wrong password,
+invalid key) — you'll just waste time getting the same error repeatedly.
+
+WHY EXPONENTIAL BACKOFF (not immediate retry):
+Immediate retry hammers a struggling service and makes it worse.
+Exponential backoff gives the service breathing room to recover:
+  Attempt 1 fails → wait 100ms
+  Attempt 2 fails → wait 200ms
+  Attempt 3 fails → wait 400ms → give up
+Each wait doubles, so the service gets progressively more time to recover.
+
+THUNDERING HERD PROBLEM:
+If many clients retry at the same exact time (e.g. all retry after exactly 1s),
+they all hit the service simultaneously when it recovers and knock it back down.
+Exponential backoff with jitter (random offset added to delay) is the production
+solution. Our implementation uses pure exponential — simple and good enough for
+startup retries.
+
+WHERE WE USE IT:
+Only in InitRedis() (startup), NOT in cache.Get/Set/Delete (per-request).
+- Startup: Redis might still be booting. A few retries over seconds is fine,
+  no user is waiting.
+- Per-request: Retrying in cache.Get() means every user request to a down Redis
+  waits 500ms+1s+2s = 3.5s. Terrible UX.
+- Runtime Redis failures are handled by the circuit breaker instead — fast rejection.
+
+HIGHER-ORDER FUNCTION:
+Do() takes func() error so it's generic. The same retry logic works for Redis ping,
+DB connection, HTTP call — anything that can fail and succeed on retry.
+*/
+
 // Do retries the given operation with exponential backoff
 //
 // Parameters:

@@ -77,9 +77,14 @@ import (
 //
 // Why not declare in main.go?
 //   main package variables are invisible to handlers package (scope isolation)
-//
+// In Go, a package is like a Private House.
+// If you put the variable in main, the handlers package can't see it (it's in a different house).
+
+// Since the RateLimitMiddleware (the code that needs the number) lives in the handlers house, the variable must live there too.
+
+// We make it Capitalized (RateLimitRequests) so that the main package can reach in and change the value if it needs to, but the "ownership" stays with the middleware.
 var (
-	RateLimitRequests = 100        // Default: 100 requests
+	RateLimitRequests = 100         // Default: 100 requests
 	RateLimitWindow   = time.Minute // Default: 1 minute
 )
 
@@ -127,3 +132,39 @@ func RateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		next(w, r)
 	}
 }
+
+/*
+=== INTERVIEW ANSWER: RATE LIMITING ===
+
+WHAT:
+Rate limiting controls how many requests a client (IP address) can make in a
+time window. Exceed the limit → 429 Too Many Requests.
+
+WHY:
+Prevents abuse: scraping, brute-force login attempts, accidental loops in client
+code, or intentional denial-of-service. Without it, one bad client can exhaust
+server resources for everyone.
+
+HOW (Fixed Window algorithm):
+1. Request comes in → INCR ratelimit:<ip> in Redis (atomic increment)
+2. count == 1 → first request this window → set TTL (EXPIRE key 60s)
+   Why only on count==1? Setting expiry on every request resets the window.
+   The key must expire at a FIXED time from the first request, not the latest.
+3. count > limit → return 429
+4. Otherwise → allow through, call next middleware
+
+WHY REDIS (not in-memory map):
+- Multiple servers: in-memory counters are per-server. With Redis, all servers
+  share one counter. User can't bypass limit by hitting different servers.
+- Server restarts: in-memory state is lost. Redis persists across restarts.
+- INCR is atomic: no race conditions even with concurrent requests.
+
+CURRENT IMPLEMENTATION: IP-based (r.RemoteAddr)
+TRADE-OFF: All users behind the same NAT (office, university) share one limit.
+Production alternative: key by user ID from JWT token for per-user precision.
+
+OTHER ALGORITHMS (know the names):
+- Sliding window: more accurate, no burst at window boundary, but more complex
+- Token bucket: allow short bursts, smooth out sustained traffic (Nginx uses this)
+- Fixed window (ours): simple, cheap, slight burst allowed at window edges
+*/

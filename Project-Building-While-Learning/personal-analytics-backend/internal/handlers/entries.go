@@ -112,6 +112,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// reason to delete as if existing data is there its now stale as we created newly this is called the cache invalidaton.
 	cache.Delete(fmt.Sprintf("count:user:%d", userID))
 
 	// Add background job to process this entry (async)

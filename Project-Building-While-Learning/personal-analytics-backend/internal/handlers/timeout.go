@@ -99,3 +99,48 @@ func TimeoutMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 	}
 }
+/*
+=== INTERVIEW ANSWER: REQUEST TIMEOUT MIDDLEWARE ===
+
+WHAT:
+TimeoutMiddleware wraps every handler with a deadline. If the handler doesn't
+respond within the limit (10s), the client gets a 504 Gateway Timeout immediately
+instead of waiting forever.
+
+WHY:
+If Redis or DB hangs, the goroutine handling that request blocks forever —
+a goroutine leak. With thousands of concurrent requests all hanging, the server
+runs out of memory and crashes. Timeout middleware caps the damage.
+
+HOW:
+1. context.WithTimeout(r.Context(), 10s) — creates a "ticking bomb" context.
+   After 10s, ctx.Done() channel closes, signalling all listeners to stop.
+2. r.WithContext(ctx) — replaces the request's context so downstream DB/Redis
+   calls using r.Context() automatically get the timeout.
+3. Handler runs in a GOROUTINE — critical. Without this, next(w,r) would block
+   the current goroutine and the select could never fire concurrently.
+4. select races done channel vs ctx.Done():
+   - done closes first → handler finished normally, return
+   - ctx.Done() fires first → 10s exceeded, write 504 and return
+5. defer cancel() — always called, releases context resources (prevents leak).
+
+WHY GOROUTINE IS REQUIRED:
+Two things must run concurrently: the handler doing work, and the middleware
+watching the clock. A goroutine is the only way to do both at the same time.
+Without it, the select would never be reached until the handler already finished.
+
+WHY close(done) NOT done <- true:
+close() unblocks ALL readers at once. A send unblocks only one.
+struct{} carries zero bytes — it's a pure signal with no data.
+
+GOROUTINE LEAK CAVEAT:
+After timeout fires, the handler goroutine keeps running — you cannot force-kill
+goroutines in Go. The CLIENT gets the fast 504, but the goroutine lives until it
+naturally finishes. To truly cancel work: pass ctx to DB/Redis calls — they
+abort automatically when the context is cancelled.
+
+TRADE-OFFS:
+- Response may already be partially written when timeout fires — production would
+  use a ResponseWriter wrapper to detect this and avoid writing headers twice.
+- 10s is configurable via REQUEST_TIMEOUT env var.
+*/

@@ -233,3 +233,56 @@ func errorResponseAuth(w http.ResponseWriter, status int, message string) {
 }
 
 // respondJSON is defined in entries.go and shared across all handlers in this package
+
+/*
+=== INTERVIEW ANSWER: JWT AUTHENTICATION ===
+
+WHAT:
+JWT (JSON Web Token) is a self-contained identity token. After login, the server
+issues a signed token. The client sends it with every request to prove identity.
+No session stored on server — the token itself carries the proof.
+
+AUTHENTICATION vs AUTHORIZATION:
+- Authentication: proving who you are (login, token verification) ← what JWT does
+- Authorization: what you're allowed to do after identity is confirmed
+
+THE 3 PARTS OF A JWT (header.payload.signature):
+- Header:    algorithm used (HS256). Not secret, just metadata.
+- Payload:   claims — user_id, exp. Base64 encoded, NOT encrypted.
+             Anyone can decode and read it. Never put passwords here.
+- Signature: HMAC(header + payload + JWT_SECRET). This is the security.
+             Tamper with payload → signature no longer matches → rejected.
+
+FULL FLOW:
+1. Register: validate → bcrypt hash password → save user to DB
+2. Login: validate → fetch user by email → bcrypt.CompareHashAndPassword
+   → create claims {user_id, exp} → jwt.NewWithClaims (unsigned Go object)
+   → .SignedString([]byte(secret)) → signed token string returned to client
+3. Protected request: client sends Authorization: Bearer <token>
+4. AuthMiddleware: strip "Bearer " → ParseWithClaims (verifies signature + expiry)
+   → extract user_id → context.WithValue(r.Context(), "user_id", id)
+5. Handler: r.Context().Value("user_id") → query only that user's data
+6. Token invalid/expired → 401 Unauthorized → return → handler never runs
+
+WHAT IS context.Context:
+A bag of request-scoped values that travels with the request through the entire
+middleware chain into the handler. Standard Go way to pass data between middleware
+and handlers without changing function signatures. Every http.Request carries one.
+
+BCRYPT PASSWORD HASHING:
+- One-way + salted. Same password hashed twice = different results.
+- bcrypt.CompareHashAndPassword extracts salt from stored hash, re-hashes input
+  with same salt, compares. You never store or see the plain password.
+- Salt prevents: two users with same password having identical hashes in DB.
+
+WHY JWT_SECRET IS CRITICAL:
+It's not related to passwords. It's the stamp that proves tokens came from your
+server. With the secret, an attacker forges valid tokens for ANY user_id with no
+password, no DB, no login needed. Server cannot distinguish forged from real.
+Store only in env var, never in code or logs. If leaked → rotate immediately.
+
+TRADE-OFFS:
+- JWT can't be invalidated before expiry (logout doesn't truly invalidate token)
+- Production fix: token blocklist in Redis, or short expiry + refresh tokens
+- Stateless = scales easily (no session DB needed), but revocation is hard
+*/

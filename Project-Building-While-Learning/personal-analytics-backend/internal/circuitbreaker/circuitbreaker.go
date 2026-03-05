@@ -80,6 +80,7 @@ func NewCircuitBreaker(threshold int, cooldown time.Duration) *CircuitBreaker {
 // Without a lock, two goroutines could both read state="closed" and both
 // increment failureCount simultaneously — leading to wrong counts (race condition).
 // The mutex ensures only ONE goroutine reads and updates state at a time.
+// The circuit breaker is generic — it works for any operation that can succeed or fail. The caller decides what the operation is.
 func (cb *CircuitBreaker) Execute(operation func() error) error {
 
 	cb.mu.Lock()
@@ -142,3 +143,37 @@ func (cb *CircuitBreaker) Execute(operation func() error) error {
 	return nil
 }
 
+/*
+=== INTERVIEW ANSWER: CIRCUIT BREAKER ===
+
+WHAT:
+A circuit breaker tracks the health of an external service and stops sending
+requests when that service is down.
+
+WHY:
+Redis is our cache layer. Without a circuit breaker, if Redis goes down, every
+request still tries to connect, waits for a timeout (~5s), and ties up a goroutine.
+With 100 concurrent requests, that's 100 goroutines stuck waiting — server crawls.
+After 5 failures the circuit opens. Requests 6-100 get an instant rejection — no
+waiting, no wasted goroutines.
+
+HOW (3 states):
+- Closed:    normal operation, all requests go through, failures are counted
+- Open:      threshold hit, all requests rejected immediately, cooldown starts
+- Half-open: cooldown passed, ONE test request allowed through
+             success → closed | failure → back to open
+
+IMPLEMENTATION DECISIONS:
+- Execute() takes func() error (higher-order function) so the breaker is generic —
+  it doesn't know about Redis, HTTP, or anything. Works for any external call.
+- cache.Get() needs the Redis result string out, but Execute() only returns error.
+  Solution: closure — declare result in outer scope, inner func writes to it directly.
+- sync.Mutex protects internal state (failureCount, state) from race conditions
+  when multiple goroutines call Execute() simultaneously.
+
+TRADE-OFFS (what production would do differently):
+- Use separate mutexes for read vs write (sync.RWMutex) for better performance
+- Expose state via metrics endpoint so you can observe when circuit is open
+- Per-service breakers with different thresholds (DB vs Redis vs external API)
+- Use a library like sony/gobreaker for battle-tested edge case handling
+*/
