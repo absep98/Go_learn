@@ -2,6 +2,9 @@ package worker
 
 import (
 	"log/slog"
+	"personal-analytics-backend/internal/circuitbreaker"
+	"personal-analytics-backend/internal/retry"
+	"personal-analytics-backend/internal/webhook"
 	"time"
 )
 
@@ -23,6 +26,8 @@ type Job struct {
 // JobQueue is the channel where jobs are sent
 // Think of it as the "order counter" where tickets pile up
 var JobQueue chan Job
+
+var WebhookBreaker = circuitbreaker.NewCircuitBreaker(5, 3*time.Second)
 
 // StartWorkerPool starts N workers that listen for jobs
 // Each worker is like a "chef" waiting for orders
@@ -63,7 +68,15 @@ func processJob(job Job) {
 		// Simulate sending notification / updating analytics
 		// In real app: send email, update stats, notify webhooks, etc.
 		slog.Debug("Processing entry creation", "payload", job.Payload)
-		time.Sleep(2 * time.Second) // Simulate slow task
+		err := WebhookBreaker.Execute(func() error {
+			return retry.Do(3, 500*time.Millisecond, func() error {
+				return webhook.Send("https://webhook.site/11eccba7-a84d-4b58-b86e-68d56a5d7021", job)
+			})
+		})
+
+		if err != nil {
+			slog.Error(err.Error())
+		}
 
 	case "entry_deleted":
 		slog.Debug("Processing entry deletion", "payload", job.Payload)
