@@ -35,6 +35,9 @@ type Config struct {
 
 	// RequestTimeout - max time a request can take before 504
 	RequestTimeout time.Duration
+
+	// WebhookURL
+	WebhookURL string
 }
 
 func Load() (*Config, error) {
@@ -116,5 +119,8 @@ func Load() (*Config, error) {
 	}
 	cfg.RequestTimeout = time.Duration(reqTimeout) * time.Second
 
+	// Load webhookURL
+	webhookurl := os.Getenv("WEBHOOK_URL")
+	cfg.WebhookURL = webhookurl
 	return cfg, nil
 }

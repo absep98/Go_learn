@@ -89,7 +89,7 @@ func main() {
 	defer redis.CloseRedis()
 
 	// Start background worker pool (3 workers)
-	worker.StartWorkerPool(cfg.WorkerPoolSize)
+	worker.StartWorkerPool(cfg.WorkerPoolSize, cfg.WebhookURL)
 
 	// The "Defer" Magic: defer is a Go keyword that says: "Wait until this entire function (main) is finished, then immediately run this command."
 	defer db.CloseDB()
