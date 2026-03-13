@@ -191,6 +191,7 @@ func main() {
 	}
 
 	// STEP 8: Stop background goroutines and close connections
+	worker.DrainWorkers()        // Wait for in-flight jobs to finish
 	cache.AppCache.StopCleanup() // Stop cache cleanup goroutine
 	slog.Info("Closing connections", "redis", "closing", "database", "closing")
 	slog.Info("Server stopped gracefully")

@@ -5,6 +5,7 @@ import (
 	"personal-analytics-backend/internal/circuitbreaker"
 	"personal-analytics-backend/internal/retry"
 	"personal-analytics-backend/internal/webhook"
+	"sync"
 	"time"
 )
 
@@ -34,6 +35,9 @@ var webhookURL string
 
 var sender webhook.Sender // package-level, holds whatever Sender is injected
 
+//  This is for waitgroup of workers
+var wg sync.WaitGroup
+
 // StartWorkerPool starts N workers that listen for jobs
 // Each worker is like a "chef" waiting for orders
 func StartWorkerPool(numWorkers int, url string, s webhook.Sender) {
@@ -60,12 +64,17 @@ func worker(id int) {
 		// "range JobQueue" = wait for next job, then process it
 		// When JobQueue is closed, this loop exits
 
+		// increment: job starting
+		wg.Add(1)
 		slog.Info("Worker processing job", "worker_id", id, "job_type", job.Type)
 
 		// Process the job based on its type
 		processJob(job)
 
 		slog.Info("Worker completed job", "worker_id", id, "job_type", job.Type)
+
+		// Worker is done with job
+		wg.Done()
 	}
 }
 
@@ -93,6 +102,12 @@ func processJob(job Job) {
 	default:
 		slog.Warn("Unknown job type", "job_type", job.Type)
 	}
+}
+
+// Drain workers after shutdown is initiated
+func DrainWorkers() {
+	close(JobQueue) // unblocks idle workers
+	wg.Wait()       // waits for in-glight jobs
 }
 
 // ========================================
