@@ -8,9 +8,14 @@ import (
 	"time"
 )
 
-var httpClient = &http.Client{Timeout: 5 * time.Second}
+type Sender interface {
+	Send(url string, payload interface{}) error
+}
 
-func Send(url string, payload interface{}) error {
+type HTTPSender struct{} // real sender
+type NoOpSender struct{} // test/fake sender
+
+func (h HTTPSender) Send(url string, payload interface{}) error {
 	data, err := json.Marshal(payload)
 
 	if err != nil {
@@ -32,6 +37,12 @@ func Send(url string, payload interface{}) error {
 	}
 	return nil
 }
+
+func (h NoOpSender) Send(url string, payload interface{}) error {
+	return nil // does nothing
+}
+
+var httpClient = &http.Client{Timeout: 5 * time.Second}
 
 /*
 === INTERVIEW ANSWER: WEBHOOK SENDER ===

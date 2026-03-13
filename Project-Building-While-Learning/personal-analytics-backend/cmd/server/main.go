@@ -12,6 +12,7 @@ import (
 	"personal-analytics-backend/internal/handlers"
 	"personal-analytics-backend/internal/logger"
 	"personal-analytics-backend/internal/redis"
+	"personal-analytics-backend/internal/webhook"
 	"personal-analytics-backend/internal/worker"
 
 	"github.com/joho/godotenv"
@@ -89,7 +90,7 @@ func main() {
 	defer redis.CloseRedis()
 
 	// Start background worker pool (3 workers)
-	worker.StartWorkerPool(cfg.WorkerPoolSize, cfg.WebhookURL)
+	worker.StartWorkerPool(cfg.WorkerPoolSize, cfg.WebhookURL, webhook.HTTPSender{})
 
 	// The "Defer" Magic: defer is a Go keyword that says: "Wait until this entire function (main) is finished, then immediately run this command."
 	defer db.CloseDB()

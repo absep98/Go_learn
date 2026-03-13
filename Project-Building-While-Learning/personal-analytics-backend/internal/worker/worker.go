@@ -32,14 +32,18 @@ var WebhookBreaker = circuitbreaker.NewCircuitBreaker(5, 30*time.Second)
 // package level variable (near JobQueue and WebhookBreaker):
 var webhookURL string
 
+var sender webhook.Sender // package-level, holds whatever Sender is injected
+
 // StartWorkerPool starts N workers that listen for jobs
 // Each worker is like a "chef" waiting for orders
-func StartWorkerPool(numWorkers int, url string) {
+func StartWorkerPool(numWorkers int, url string, s webhook.Sender) {
 	// Create the job queue (buffered channel with capacity 100)
 	// Buffer = how many jobs can wait in line before blocking
 	JobQueue = make(chan Job, 100)
 
 	webhookURL = url
+
+	sender = s
 	// Start the workers (each runs in its own goroutine)
 	for i := 1; i <= numWorkers; i++ {
 		go worker(i) // "go" = run in background
@@ -74,7 +78,7 @@ func processJob(job Job) {
 		slog.Debug("Processing entry creation", "payload", job.Payload)
 		err := WebhookBreaker.Execute(func() error {
 			return retry.Do(3, 500*time.Millisecond, func() error {
-				return webhook.Send(webhookURL, job)
+				return sender.Send(webhookURL, job)
 			})
 		})
 
