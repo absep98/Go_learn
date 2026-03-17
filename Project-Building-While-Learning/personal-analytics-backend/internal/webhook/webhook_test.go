@@ -38,3 +38,14 @@ func TestHTTPSender_Send_NonOKStatus(t *testing.T) {
 		t.Errorf("expected error for 500 status, got nil")
 	}
 }
+
+func TestNoOpSender(t *testing.T) {
+
+	sender := NoOpSender{}
+
+	err := sender.Send("http://example.com", nil)
+
+	if err != nil { // fail if there IS an error
+		t.Errorf("expected nil, got %v", err)
+	}
+}
