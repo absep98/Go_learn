@@ -157,7 +157,7 @@ func GetEntryByID(entryID int, userId int64) (map[string]interface{}, error) {
 }
 */
 func GetAllEntries() ([]map[string]interface{}, error) {
-	query := `SELECT id, user_id, text, mood, category, tags, created_at FROM entries ORDER BY created_at DESC`
+	query := `SELECT id, user_id, text, mood, category, created_at FROM entries ORDER BY created_at DESC`
 
 	rows, err := DB.Query(query)
 	if err != nil {

@@ -1,5 +1,55 @@
 package handlers
 
+/*
+=== HANDLERS PACKAGE TESTS ===
+
+WHAT WE ARE TESTING:
+HTTP handlers and middleware — without starting a real server.
+
+KEY CONCEPTS USED:
+
+1. httptest.NewRequest — FAKE INCOMING REQUEST
+   req := httptest.NewRequest("GET", "/ping", nil)
+   Creates a fake *http.Request. Arguments: method, URL path, body (nil = no body).
+   Passed to the handler as the `r` parameter.
+
+2. httptest.NewRecorder — FAKE RESPONSE WRITER
+   w := httptest.NewRecorder()
+   In production, the handler writes to a real network connection.
+   NewRecorder captures everything the handler writes (status, headers, body) in memory.
+   Think of it as a notepad that records the response.
+
+3. CALLING HANDLER DIRECTLY — NO SERVER NEEDED
+   PingHandler(w, req)
+   The handler runs exactly as in production — just writes to the recorder instead of network.
+
+4. w.Result() — READ WHAT WAS RECORDED
+   result := w.Result()         → converts recorder to *http.Response
+   result.StatusCode            → what status code the handler set
+   io.ReadAll(result.Body)      → read the response body as []byte
+   string(body)                 → convert bytes to readable string
+
+5. TESTING ENV VARIABLES
+   os.Setenv("KEY", "value")          → set before calling handler
+   defer os.Unsetenv("KEY")           → clean up AFTER test finishes
+   defer runs when the function returns — prevents env leaking into other tests.
+
+6. TESTING MIDDLEWARE
+   Middleware wraps a handler: func(next http.HandlerFunc) http.HandlerFunc
+   To test it: create an inner handler that captures what you need, wrap it, call wrapped.
+   For RequestIDMiddleware: inner handler reads request_id from context.
+   For LoggingMiddleware: just verify the inner handler was called (status 200).
+
+Q: Why httptest.NewServer for webhook but httptest.NewRecorder for handlers?
+A: NewRecorder tests a handler FUNCTION directly (no server).
+   NewServer starts a real local server — needed when the CODE UNDER TEST
+   makes an outgoing HTTP request (like HTTPSender.Send does).
+
+Q: Why use defer for os.Unsetenv?
+A: If the test fails mid-way and panics, defer still runs — guaranteed cleanup.
+   Without defer, a failed test could leave the env var set and break other tests.
+*/
+
 import (
 	"io"
 	"net/http"
