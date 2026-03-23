@@ -125,3 +125,45 @@ func TestDo_ZeroAttempts(t *testing.T) {
 		t.Errorf("expected 0 attempt, got %d", attempts)
 	}
 }
+
+
+func TestDo(t* testing.T){
+	tests := []struct{
+		name    string
+		maxAttempts  int
+		failTimes    int
+		wantErr bool
+		wantCalls int
+	}{
+		{"Success on first try", 3, 0, false, 1},
+		{"Success on third try", 3, 2, false, 3},
+		{"all attempts fail", 3, 99, true, 3},
+		{"zero attempts",  0, 0, true, 0},
+	}
+
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T){
+
+			attempts := 0
+			operation := func() error {
+				attempts++
+				if attempts <= tt.failTimes{
+					return fmt.Errorf("simulated failure")
+				}
+				return nil
+			}
+			err := Do(tt.maxAttempts, 0, operation)
+
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("expected no error, got %v", err)
+			}
+			if attempts != tt.wantCalls {
+				t.Errorf("expected %d attempts, got %d", tt.wantCalls, attempts)
+			}
+		})
+	}
+}
