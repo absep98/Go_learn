@@ -96,8 +96,8 @@ func TestGetEntryByID(t *testing.T) {
 		t.Errorf("expected nil error, got %v", err)
 	}
 
-	if entry["text"].(string) != "feeling good" {
-		t.Errorf("expected text 'feeling good', got %v", entry["text"])
+	if entry.Text != "feeling good" {
+		t.Errorf("expected text 'feeling good', got %v", entry.Text)
 	}
 
 }

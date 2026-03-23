@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"personal-analytics-backend/internal/cache"
+	"personal-analytics-backend/internal/models"
 	"strconv"
 	"time"
 
@@ -116,34 +117,28 @@ func InsertEntry(userID int, text string, mood int, category string) (int64, err
 }
 
 // GetEntryById retrieves the entry from database for a particular ID
-func GetEntryByID(entryID int, userId int64) (map[string]interface{}, error) {
+func GetEntryByID(entryID int, userId int64) (*models.Entry, error) {
 
 	query := `SELECT id, user_id, text, mood, category, created_at
 				FROM entries
 				WHERE id = ? and user_id = ?
 			`
 
+	var entry models.Entry
+	var createdAt string
+
 	row := DB.QueryRow(query, entryID, userId)
 
-	var id, userIDResult int64
-	var text, category, created_at string
-	var mood int
-
-	err := row.Scan(&id, &userIDResult, &text, &mood, &category, &created_at)
+	err := row.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
 	if err != nil {
 		return nil, err
 	}
 
-	entry := map[string]interface{}{
-		"id":         id,
-		"user_id":    userIDResult,
-		"text":       text,
-		"mood":       mood,
-		"category":   category,
-		"created_at": created_at,
+	entry.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return nil, err
 	}
-
-	return entry, nil
+	return &entry, nil
 }
 
 // GetAllEntries retrieves all entries from the database
@@ -156,7 +151,7 @@ func GetEntryByID(entryID int, userId int64) (map[string]interface{}, error) {
   "mood": 5
 }
 */
-func GetAllEntries() ([]map[string]interface{}, error) {
+func GetAllEntries() ([]models.Entry, error) {
 	query := `SELECT id, user_id, text, mood, category, created_at FROM entries ORDER BY created_at DESC`
 
 	rows, err := DB.Query(query)
@@ -166,23 +161,21 @@ func GetAllEntries() ([]map[string]interface{}, error) {
 	// "When this function ends, close the rows cursor"
 	defer rows.Close()
 
-	var entries []map[string]interface{}
+	var entries []models.Entry
 
 	for rows.Next() {
-		var id, userID, mood int
-		var text, category, createdAt string
-		err := rows.Scan(&id, &userID, &text, &mood, &category, &createdAt)
+		var entry models.Entry
+		var createdAt string
+
+		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
 		if err != nil {
 			return nil, err
 		}
 
-		entry := map[string]interface{}{
-			"id":         id,
-			"user_id":    userID,
-			"text":       text,
-			"mood":       mood,
-			"category":   category,
-			"created_at": createdAt,
+		entry.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
+
+		if err != nil {
+			return nil, err
 		}
 
 		entries = append(entries, entry)
@@ -193,7 +186,7 @@ func GetAllEntries() ([]map[string]interface{}, error) {
 
 // GetEntriesByUser retrieves all entries for a specific user
 // Used when user is authenticated - only show their own entries
-func GetEntriesByUser(userID int64) ([]map[string]interface{}, error) {
+func GetEntriesByUser(userID int64) ([]models.Entry, error) {
 	query := `SELECT id, user_id, text, mood, category, created_at
 	          FROM entries
 	          WHERE user_id = ?
@@ -205,25 +198,21 @@ func GetEntriesByUser(userID int64) ([]map[string]interface{}, error) {
 	}
 	defer rows.Close()
 
-	var entries []map[string]interface{}
+	var entries []models.Entry
 
 	for rows.Next() {
-		var id, userIDResult int64
-		var text, category, createdAt string
-		var mood int
 
-		err := rows.Scan(&id, &userIDResult, &text, &mood, &category, &createdAt)
+		var entry models.Entry
+		var createdAt string
+
+		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
 		if err != nil {
 			return nil, err
 		}
 
-		entry := map[string]interface{}{
-			"id":         id,
-			"user_id":    userIDResult,
-			"text":       text,
-			"mood":       mood,
-			"category":   category,
-			"created_at": createdAt,
+		entry.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
+		if err != nil {
+			return nil, err
 		}
 
 		entries = append(entries, entry)
@@ -233,7 +222,7 @@ func GetEntriesByUser(userID int64) ([]map[string]interface{}, error) {
 }
 
 // GetEntriesByUserPaginated allow users to paginate through entries instead of getting all at once.
-func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []map[string]interface{}, total int) {
+func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []models.Entry, total int) {
 
 	// 1. Build cache key
 	cacheKey := fmt.Sprintf("count:user:%d", userId)
@@ -269,23 +258,21 @@ func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []map[s
 	defer rows.Close()
 
 	for rows.Next() {
-		var id, userIDResult int64
-		var text, category, created_at string
-		var mood int
 
-		err := rows.Scan(&id, &userIDResult, &text, &mood, &category, &created_at)
+		var entry models.Entry
+		var createdAt string
+
+
+		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
 		if err != nil {
 			return nil, 0
 		}
 
-		entry := map[string]interface{}{
-			"id":         id,
-			"user_id":    userId,
-			"text":       text,
-			"mood":       mood,
-			"category":   category,
-			"created_at": created_at,
+		entry.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
+		if err != nil {
+			return nil, 0
 		}
+
 		entries = append(entries, entry)
 	}
 	return entries, total

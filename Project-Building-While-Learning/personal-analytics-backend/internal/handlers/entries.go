@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"personal-analytics-backend/internal/cache"
 	"personal-analytics-backend/internal/db"
+	"personal-analytics-backend/internal/models"
 	"personal-analytics-backend/internal/worker"
 	"strconv"
 )
@@ -192,7 +193,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	// Handle empty case - return empty array instead of null
 	if entries == nil {
-		entries = []map[string]interface{}{}
+		entries = []models.Entry{}
 	}
 
 	// Calculate total pages using integer ceiling division

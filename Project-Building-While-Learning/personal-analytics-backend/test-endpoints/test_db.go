@@ -53,11 +53,11 @@ func main() {
 		fmt.Printf("Found %d entries:\n\n", len(entries))
 		for i, entry := range entries {
 			fmt.Printf("Entry #%d:\n", i+1)
-			fmt.Printf("  ID: %v\n", entry["id"])
-			fmt.Printf("  User ID: %v\n", entry["user_id"])
-			fmt.Printf("  Text: %v\n", entry["text"])
-			fmt.Printf("  Mood: %v\n", entry["mood"])
-			fmt.Printf("  Created: %v\n", entry["created_at"])
+			fmt.Printf("  ID: %v\n", entry.ID)
+			fmt.Printf("  User ID: %v\n", entry.UserID)
+			fmt.Printf("  Text: %v\n", entry.Text)
+			fmt.Printf("  Mood: %v\n", entry.Mood)
+			fmt.Printf("  Created: %v\n", entry.CreatedAt)
 			fmt.Println()
 		}
 	}
