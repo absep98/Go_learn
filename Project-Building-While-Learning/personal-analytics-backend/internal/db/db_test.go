@@ -48,6 +48,7 @@ A: InsertEntry returns int64. GetEntryByID expects int.
 */
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -67,7 +68,7 @@ func TestMain(m *testing.M) {
 
 func TestInsertEntry(t *testing.T) {
 
-	id, err := InsertEntry(1, "feeling good", 8, "mood")
+	id, err := InsertEntry(context.Background(), 1, "feeling good", 8, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %d", id)
@@ -80,7 +81,7 @@ func TestInsertEntry(t *testing.T) {
 }
 
 func TestGetEntryByID(t *testing.T) {
-	id, err := InsertEntry(1, "feeling good", 8, "mood")
+	id, err := InsertEntry(context.Background(), 1, "feeling good", 8, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %d", id)
@@ -90,7 +91,7 @@ func TestGetEntryByID(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 
-	entry, err := GetEntryByID(int(id), 1)
+	entry, err := GetEntryByID(context.Background(), int(id), 1)
 
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
@@ -104,7 +105,7 @@ func TestGetEntryByID(t *testing.T) {
 
 func TestGetEntryByID_NotFound(t *testing.T) {
 
-	entry, err := GetEntryByID(9999, 1)
+	entry, err := GetEntryByID(context.Background() ,9999, 1)
 
 	if err == nil {
 		t.Errorf("expected error for missing entry, got nil")
@@ -117,7 +118,7 @@ func TestGetEntryByID_NotFound(t *testing.T) {
 
 func TestGetAllEntries(t *testing.T) {
 
-	id, err := InsertEntry(2, "feeling good", 8, "mood")
+	id, err := InsertEntry(context.Background(), 2, "feeling good", 8, "mood")
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %d", id)
 	}
@@ -126,7 +127,7 @@ func TestGetAllEntries(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 
-	id, err = InsertEntry(10, "feeling bad", 5, "mood")
+	id, err = InsertEntry(context.Background(), 10, "feeling bad", 5, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %d", id)
@@ -136,7 +137,7 @@ func TestGetAllEntries(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 
-	entry, err := GetAllEntries()
+	entry, err := GetAllEntries(context.Background())
 
 	if err != nil {
 		t.Errorf("failed to get all entries %v", err)
@@ -149,7 +150,7 @@ func TestGetAllEntries(t *testing.T) {
 
 func TestUpdateEntry(t *testing.T) {
 
-	id, err := InsertEntry(100, "Feeling good feeling alright", 10, "mood")
+	id, err := InsertEntry(context.Background(), 100, "Feeling good feeling alright", 10, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %v", err)
@@ -159,7 +160,7 @@ func TestUpdateEntry(t *testing.T) {
 		t.Errorf("expected nil error on insert, got %v", err)
 	}
 
-	rowsAffected, err := UpdateEntry(int(id), 100, "Not going well", 7, "mood")
+	rowsAffected, err := UpdateEntry(context.Background(), int(id), 100, "Not going well", 7, "mood")
 
 	if rowsAffected != 1 {
 		t.Errorf("expected 1 row updated, got %d", rowsAffected)
@@ -173,7 +174,7 @@ func TestUpdateEntry(t *testing.T) {
 
 func TestDeleteEntry(t *testing.T) {
 
-	id, err := InsertEntry(100, "Feeling good, feeling alright", 10, "mood")
+	id, err := InsertEntry(context.Background(), 100, "Feeling good, feeling alright", 10, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %v", err)
@@ -183,7 +184,7 @@ func TestDeleteEntry(t *testing.T) {
 		t.Errorf("expected nil error on insert, got %v", err)
 	}
 
-	rowAffected, err := DeleteEntry(int(id), 100)
+	rowAffected, err := DeleteEntry(context.Background(), int(id), 100)
 
 	if rowAffected != 1 {
 		t.Errorf("expected 1 row updated, got %d", rowAffected)

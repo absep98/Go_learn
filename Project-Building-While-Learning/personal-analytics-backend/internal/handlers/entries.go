@@ -107,7 +107,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert into database
-	id, err := db.InsertEntry(int(userID), req.Text, req.Mood, req.Category)
+	id, err := db.InsertEntry(r.Context(), int(userID), req.Text, req.Mood, req.Category)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to save entry")
 		return
@@ -189,7 +189,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	// Get entries for this user only
 	// Note: int(userID) converts int64 to int to match function signature
-	entries, total := db.GetEntriesByUserPaginated(int(userID), page, limit)
+	entries, total := db.GetEntriesByUserPaginated(r.Context(), int(userID), page, limit)
 
 	// Handle empty case - return empty array instead of null
 	if entries == nil {
@@ -274,7 +274,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call database to update entry
-	rowsAffected, err := db.UpdateEntry(entryId, userID, req.Text, req.Mood, req.Category)
+	rowsAffected, err := db.UpdateEntry(r.Context(), entryId, userID, req.Text, req.Mood, req.Category)
 	if err != nil {
 		slog.Error("Database error on update", "error", err, "entry_id", entryId)
 		errorResponse(w, http.StatusInternalServerError, "Failed to update entry")
@@ -324,7 +324,7 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 
 	slog.Debug("Deleting entry", "entry_id", entryId, "user_id", userID)
 
-	rowsAffected, err := db.DeleteEntry(entryId, userID)
+	rowsAffected, err := db.DeleteEntry(r.Context(), entryId, userID)
 
 	if err != nil {
 		slog.Error("Database error on delete", "error", err, "entry_id", entryId)

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -96,11 +97,11 @@ func createTables() error {
 // InsertEntry inserts a new entry into the database
 // Puts new data INTO the database (like adding a new row to an Excel sheet)
 // Takes 5 inputs: userID (which user), text (what they wrote), mood (their mood score), tags (list of tags), category (entry type)
-func InsertEntry(userID int, text string, mood int, category string) (int64, error) {
+func InsertEntry(ctx context.Context, userID int, text string, mood int, category string) (int64, error) {
 	// The ? marks are placeholders (like blanks in a form)
 	query := `INSERT INTO entries (user_id, text, mood, category) VALUES (?, ?, ?, ?)`
 	// "Execute the query and fill in the ? marks with actual values."
-	result, err := DB.Exec(query, userID, text, mood, category)
+	result, err := DB.ExecContext(ctx, query, userID, text, mood, category)
 	if err != nil {
 		return 0, err
 	}
@@ -117,7 +118,7 @@ func InsertEntry(userID int, text string, mood int, category string) (int64, err
 }
 
 // GetEntryById retrieves the entry from database for a particular ID
-func GetEntryByID(entryID int, userId int64) (*models.Entry, error) {
+func GetEntryByID(ctx context.Context, entryID int, userId int64) (*models.Entry, error) {
 
 	query := `SELECT id, user_id, text, mood, category, created_at
 				FROM entries
@@ -127,7 +128,7 @@ func GetEntryByID(entryID int, userId int64) (*models.Entry, error) {
 	var entry models.Entry
 	var createdAt string
 
-	row := DB.QueryRow(query, entryID, userId)
+	row := DB.QueryRowContext(ctx, query, entryID, userId)
 
 	err := row.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
 	if err != nil {
@@ -151,10 +152,10 @@ func GetEntryByID(entryID int, userId int64) (*models.Entry, error) {
   "mood": 5
 }
 */
-func GetAllEntries() ([]models.Entry, error) {
+func GetAllEntries(ctx context.Context) ([]models.Entry, error) {
 	query := `SELECT id, user_id, text, mood, category, created_at FROM entries ORDER BY created_at DESC`
 
-	rows, err := DB.Query(query)
+	rows, err := DB.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -186,13 +187,13 @@ func GetAllEntries() ([]models.Entry, error) {
 
 // GetEntriesByUser retrieves all entries for a specific user
 // Used when user is authenticated - only show their own entries
-func GetEntriesByUser(userID int64) ([]models.Entry, error) {
+func GetEntriesByUser(ctx context.Context, userID int64) ([]models.Entry, error) {
 	query := `SELECT id, user_id, text, mood, category, created_at
 	          FROM entries
 	          WHERE user_id = ?
 	          ORDER BY created_at DESC`
 
-	rows, err := DB.Query(query, userID)
+	rows, err := DB.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +223,7 @@ func GetEntriesByUser(userID int64) ([]models.Entry, error) {
 }
 
 // GetEntriesByUserPaginated allow users to paginate through entries instead of getting all at once.
-func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []models.Entry, total int) {
+func GetEntriesByUserPaginated(ctx context.Context, userId int, page int, limit int) (entries []models.Entry, total int) {
 
 	// 1. Build cache key
 	cacheKey := fmt.Sprintf("count:user:%d", userId)
@@ -233,7 +234,7 @@ func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []model
 	} else {
 		// 3. Cache miss: query database
 		queryForCount := `SELECT COUNT(*) FROM entries WHERE user_id = ?`
-		err := DB.QueryRow(queryForCount, userId).Scan(&total)
+		err := DB.QueryRowContext(ctx, queryForCount, userId).Scan(&total)
 
 		if err != nil {
 			return nil, 0
@@ -249,7 +250,7 @@ func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []model
 	 ORDER BY created_at DESC
 	 LIMIT ? OFFset ?
 	 `
-	rows, err := DB.Query(queryForEntries, userId, limit, (page-1)*limit)
+	rows, err := DB.QueryContext(ctx, queryForEntries, userId, limit, (page-1)*limit)
 
 	if err != nil {
 		return nil, 0
@@ -280,10 +281,10 @@ func GetEntriesByUserPaginated(userId int, page int, limit int) (entries []model
 
 // CreateUser inserts a new user into the database
 // Takes email and hashed password (NOT plain password!)
-func CreateUser(email string, passwordHash string) (int64, error) {
+func CreateUser(ctx context.Context, email string, passwordHash string) (int64, error) {
 	query := `INSERT INTO users (email, password_hash) VALUES (?, ?)`
 
-	result, err := DB.Exec(query, email, passwordHash)
+	result, err := DB.ExecContext(ctx, query, email, passwordHash)
 	if err != nil {
 		return 0, err
 	}
@@ -299,13 +300,13 @@ func CreateUser(email string, passwordHash string) (int64, error) {
 
 // GetUserByEmail retrieves a user by their email
 // Returns user_id and password_hash for login verification
-func GetUserByEmail(email string) (int64, string, error) {
+func GetUserByEmail(ctx context.Context, email string) (int64, string, error) {
 	query := `SELECT id, password_hash FROM users WHERE email = ?`
 
 	var userID int64
 	var passwordHash string
 
-	err := DB.QueryRow(query, email).Scan(&userID, &passwordHash)
+	err := DB.QueryRowContext(ctx, query, email).Scan(&userID, &passwordHash)
 	if err != nil {
 		return 0, "", err
 	}
@@ -315,12 +316,12 @@ func GetUserByEmail(email string) (int64, string, error) {
 
 // Update Entry
 // Updates an entry only if it belongs to the authenticated user
-func UpdateEntry(entryId int, userID int64, text string, mood int, category string) (int64, error) {
+func UpdateEntry(ctx context.Context, entryId int, userID int64, text string, mood int, category string) (int64, error) {
 
 	query := `UPDATE entries SET text = ?, mood = ?, category = ? WHERE id = ? AND user_id = ?`
 
 	// Parameters must match placeholder order: text, mood, category, id, user_id
-	result, err := DB.Exec(query, text, mood, category, entryId, userID)
+	result, err := DB.ExecContext(ctx, query, text, mood, category, entryId, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -335,11 +336,11 @@ func UpdateEntry(entryId int, userID int64, text string, mood int, category stri
 	return rowsAffected, nil
 }
 
-func DeleteEntry(entryId int, userID int64) (int64, error) {
+func DeleteEntry(ctx context.Context, entryId int, userID int64) (int64, error) {
 
 	query := `DELETE FROM ENTRIES WHERE id = ? and user_id = ?`
 
-	result, err := DB.Exec(query, entryId, userID)
+	result, err := DB.ExecContext(ctx, query, entryId, userID)
 	if err != nil {
 		return 0, err
 	}

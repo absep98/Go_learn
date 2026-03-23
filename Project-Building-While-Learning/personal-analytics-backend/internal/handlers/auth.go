@@ -101,7 +101,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save user to database
-	userID, err := db.CreateUser(req.Email, string(passwordHash))
+	userID, err := db.CreateUser(r.Context(), req.Email, string(passwordHash))
 	if err != nil {
 		// Check if email already exists (SQLite UNIQUE constraint violation)
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -153,7 +153,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user from database
-	userID, passwordHash, err := db.GetUserByEmail(req.Email)
+	userID, passwordHash, err := db.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
 		// Don't reveal if user exists or not (security best practice)
 		slog.Warn("Login attempt for non-existent user", "email", req.Email)
