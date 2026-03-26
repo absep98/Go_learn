@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"personal-analytics-backend/internal/db"
 )
 
 func main() {
-	fmt.Println("=== DATABASE TEST ===\n")
+	fmt.Println("=== DATABASE TEST ===")
 
 	// Initialize database
 	err := db.InitDB("./test_data.db")
@@ -16,24 +17,26 @@ func main() {
 	}
 	defer db.CloseDB()
 
+	ctx := context.Background()
+
 	// Insert some test entries
 	fmt.Println("📝 Inserting test entries...")
 
-	id1, err := db.InsertEntry(101, "Feeling great today! Got a lot done.", 5)
+	id1, err := db.InsertEntry(ctx, 101, "Feeling great today! Got a lot done.", 5, "general")
 	if err != nil {
 		log.Printf("Error inserting entry 1: %v", err)
 	} else {
 		fmt.Printf("✅ Inserted entry with ID: %d\n", id1)
 	}
 
-	id2, err := db.InsertEntry(101, "Bit stressed with work deadlines", 3)
+	id2, err := db.InsertEntry(ctx, 101, "Bit stressed with work deadlines", 3, "work")
 	if err != nil {
 		log.Printf("Error inserting entry 2: %v", err)
 	} else {
 		fmt.Printf("✅ Inserted entry with ID: %d\n", id2)
 	}
 
-	id3, err := db.InsertEntry(102, "Had a productive coding session", 4)
+	id3, err := db.InsertEntry(ctx, 102, "Had a productive coding session", 4, "general")
 	if err != nil {
 		log.Printf("Error inserting entry 3: %v", err)
 	} else {
@@ -42,7 +45,7 @@ func main() {
 
 	// Read all entries
 	fmt.Println("\n📖 Reading all entries from database...")
-	entries, err := db.GetAllEntries()
+	entries, err := db.GetAllEntries(ctx)
 	if err != nil {
 		log.Fatalf("Error reading entries: %v", err)
 	}
