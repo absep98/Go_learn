@@ -1,0 +1,49 @@
+# CI = Continuous Integration
+# Every time you push to main (or open a pull request), GitHub runs this file
+# automatically on a fresh Linux VM. If any step fails, GitHub shows a red X
+# on the commit so you know immediately something is broken.
+name: CI
+
+on:
+  # Run on every push to main branch
+  push:
+    branches: [ main ]
+  # Also run when a pull request targets main (before merging)
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    # GitHub spins up a fresh Ubuntu VM for this job
+    runs-on: ubuntu-latest
+
+    # All steps run from inside the backend directory.
+    # The backend has its own go.mod so Go commands must run from there.
+    defaults:
+      run:
+        working-directory: Project-Building-While-Learning/personal-analytics-backend
+
+    steps:
+      # Step 1: Download your repo code onto the VM
+      - uses: actions/checkout@v4
+
+      # Step 2: Install Go 1.22 on the VM (it doesn't have it by default)
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.22
+
+      # Step 3: Check the code compiles without errors
+      # ./cmd/... = entry point (main.go), ./internal/... = all business logic
+      # learning-demos/ and test-endpoints/ are excluded — they are standalone
+      # demo scripts, not part of the application, and would cause build errors.
+      - name: Build
+        run: go build ./cmd/... ./internal/...
+
+      # Step 4: Static analysis — catches bugs that compile fine but are wrong
+      # Examples: wrong printf format verbs, mutex copied by value, redundant newlines
+      - name: Vet
+        run: go vet ./cmd/... ./internal/...
+
+      # Step 5: Run all *_test.go files and confirm every Test* function passes
+      - name: Test
+        run: go test ./cmd/... ./internal/...
