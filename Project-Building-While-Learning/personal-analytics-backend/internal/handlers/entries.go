@@ -57,7 +57,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDValue := r.Context().Value("user_id")
+	userIDValue := r.Context().Value(userIDKey)
 	if userIDValue == nil {
 		errorResponse(w, http.StatusUnauthorized, "User not authenticated")
 		return
@@ -165,7 +165,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get authenticated user_id from context (middleware puts it there)
-	userIDValue := r.Context().Value("user_id")
+	userIDValue := r.Context().Value(userIDKey)
 	if userIDValue == nil {
 		// This shouldn't happen if middleware is working, but check anyway
 		respondJSON(w, http.StatusUnauthorized, map[string]interface{}{
@@ -238,7 +238,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDValue := r.Context().Value("user_id")
+	userIDValue := r.Context().Value(userIDKey)
 	if userIDValue == nil {
 		errorResponse(w, http.StatusUnauthorized, "User not authenticated")
 		return
@@ -310,7 +310,7 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDValue := r.Context().Value("user_id")
+	userIDValue := r.Context().Value(userIDKey)
 	if userIDValue == nil {
 		errorResponse(w, http.StatusUnauthorized, "User not authenticated")
 		return

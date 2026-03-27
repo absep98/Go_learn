@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"net/http"
 	"log/slog"
+	"net/http"
 )
 
 // RequestMiddleware adds a unique request ID to each request
@@ -15,7 +15,7 @@ func RequestIDMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		requestID := GenerateRequestID()
 
 		// Store it in context using context.WithValue()
-		ctx := context.WithValue(r.Context(), "request_id", requestID)
+		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
 		next(w, r.WithContext(ctx))
 	}
 }
@@ -40,17 +40,16 @@ func GenerateRequestID() string {
 	return hexstring
 }
 
-
 // GetLoggerWithRequestID returns a logger that includes the request_id
 func GetLoggerWithRequestID(r *http.Request) *slog.Logger {
 	// Get the value from context (might be nil if not set)
-	value := r.Context().Value("request_id")  // ← Capital C!
+	value := r.Context().Value("request_id") // ← Capital C!
 
 	// Type assert to string
 	requestID, ok := value.(string)
-	if !ok {  // ← !ok means "if not ok" (if assertion failed)
+	if !ok { // ← !ok means "if not ok" (if assertion failed)
 		// if Type assertion failed, use empty string
-		requestID = ""  // ← Set the variable, don't return
+		requestID = "" // ← Set the variable, don't return
 	}
 	// return a logger that always includes request_id
 	// slog.Default().With() creates a new logger with this field in every log.

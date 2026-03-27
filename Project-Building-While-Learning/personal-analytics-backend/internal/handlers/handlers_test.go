@@ -101,7 +101,7 @@ func TestRequestIDMiddleware(t *testing.T) {
 
 	// inner handler - captures whatever is in context
 	innerHandler := func(w http.ResponseWriter, r *http.Request) {
-		captureID = r.Context().Value("request_id").(string)
+		captureID = r.Context().Value(requestIDKey).(string)
 	}
 
 	// wrap it with the middleware

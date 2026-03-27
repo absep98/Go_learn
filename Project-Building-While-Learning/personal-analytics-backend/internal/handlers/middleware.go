@@ -12,6 +12,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+type contextKey string
+
+const (
+	userIDKey    contextKey = "user_id"
+	requestIDKey contextKey = "request_id"
+)
+
 // AuthMiddleware verifies JWT token before allowing access to protected routes
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +60,7 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// STEP 5: Put user_id in request context (like a backpack for passing data)
-		ctx := context.WithValue(r.Context(), "user_id", int64(userID))
+		ctx := context.WithValue(r.Context(), userIDKey, int64(userID))
 
 		// STEP 6: Call next handler with updated context
 		slog.Debug("User authenticated", "user_id", int64(userID))

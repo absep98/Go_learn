@@ -70,7 +70,7 @@ func TestCreateEntry(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/entries", body)
 
-	ctx := context.WithValue(req.Context(), "user_id", int64(1))
+	ctx := context.WithValue(req.Context(), userIDKey, int64(1))
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
@@ -98,7 +98,7 @@ func TestCreateEntry_MissingText(t *testing.T) {
 	body := strings.NewReader(`{"text":"","mood":8,"category":"mood"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/entries", body)
-	ctx := context.WithValue(req.Context(), "user_id", int64(1))
+	ctx := context.WithValue(req.Context(), userIDKey, int64(1))
 
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
@@ -122,7 +122,7 @@ func TestCreateEntry_InvalidMood(t *testing.T) {
 	body := strings.NewReader(`{"text":"feeling good","mood":400,"category":"mood"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/entries", body)
-	ctx := context.WithValue(req.Context(), "user_id", int64(1))
+	ctx := context.WithValue(req.Context(), userIDKey, int64(1))
 
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
