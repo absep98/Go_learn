@@ -1,0 +1,57 @@
+# docker-compose.yml
+# Defines the FULL application stack — all services needed to run the app.
+# One command starts everything: docker compose up
+# One command stops everything: docker compose down
+#
+# WHY docker-compose over plain docker run?
+# Without it you'd need to: build the image, create a network, run Redis on
+# that network, run the app on the same network, pass env vars manually.
+# docker-compose automates all of that.
+
+services:
+
+  # ---------------------------------------------------------------
+  # SERVICE 1: The Go backend server
+  # ---------------------------------------------------------------
+  app:
+    # build: . means "look for a Dockerfile in the current directory and build it"
+    # This runs our 2-stage Dockerfile → produces the ~15MB Alpine image
+    build: .
+
+    # Map host port → container port
+    # Format: "HOST:CONTAINER"
+    # "8080:8080" means: when you hit localhost:8080 on your machine,
+    # docker forwards that traffic to port 8080 inside the container
+    ports:
+      - "8080:8080"
+
+    # Environment variables injected into the container at runtime.
+    # These replace os.Getenv() calls in your Go code.
+    # NOTE: In production, never hardcode secrets here — use Docker secrets
+    # or a secrets manager. This is fine for local development.
+    environment:
+      - JWT_SECRET=supersecretkey
+      # REDIS_HOST uses "redis" (the service name below) as the hostname.
+      # Docker compose puts all services on the same internal network automatically.
+      # So "redis" resolves to the Redis container — not localhost.
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+
+    # Don't start this service until the redis service is running.
+    # Prevents the app from crashing on startup because Redis isn't ready yet.
+    depends_on:
+      - redis
+
+  # ---------------------------------------------------------------
+  # SERVICE 2: Redis (rate limiting + caching)
+  # No Dockerfile needed — we use the official image directly from Docker Hub
+  # ---------------------------------------------------------------
+  redis:
+    # redis:alpine = official Redis image built on Alpine (~30MB)
+    # We don't build this — Docker pulls it automatically on first run
+    image: redis:alpine
+
+    # Expose Redis port so you can connect from your host machine too
+    # (useful for debugging with redis-cli directly)
+    ports:
+      - "6379:6379"

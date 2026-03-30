@@ -47,3 +47,16 @@ jobs:
       # Step 5: Run all *_test.go files and confirm every Test* function passes
       - name: Test
         run: go test ./cmd/... ./internal/...
+
+      # Step 6: golangci-lint — runs 100+ linters in one tool
+      # Catches: unused variables, error return values ignored, code style issues,
+      # security anti-patterns, and much more — beyond what go vet alone catches.
+      # Uses the official action which caches the lint binary for speed.
+      # 'continue-on-error: true' means lint warnings won't fail the whole pipeline —
+      # useful while learning; set to false on production repos to enforce clean code.
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: Project-Building-While-Learning/personal-analytics-backend
+        continue-on-error: true
