@@ -11,6 +11,7 @@ import (
 	"personal-analytics-backend/internal/db"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -104,11 +105,10 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	userID, err := db.CreateUser(r.Context(), req.Email, string(passwordHash))
 	if err != nil {
 		// Check if email already exists (SQLite UNIQUE constraint violation)
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
 			errorResponseAuth(w, http.StatusConflict, "Email already registered")
 			return
 		}
-
 		slog.Error("Error creating user", "error", err)
 		errorResponseAuth(w, http.StatusInternalServerError, "Failed to create user")
 		return

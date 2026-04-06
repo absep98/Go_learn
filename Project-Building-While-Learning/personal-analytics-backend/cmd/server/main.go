@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -72,11 +73,10 @@ func main() {
 	handlers.RequestTimeout = cfg.RequestTimeout
 
 	// Initialize database
-	// dbPath := os.Getenv("DB_PATH")
-	// if dbPath == "" {
-	// 	dbPath = "./data.db"
-	// }
-	err = db.InitDB(cfg.DBPath)
+	// Build Postgres connection string (DSN) from individual config fields
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName)
+	err = db.InitDB(dsn)
 	if err != nil {
 		slog.Error("Failed to initialize database", "error", err)
 		os.Exit(1)

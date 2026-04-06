@@ -20,7 +20,7 @@ import (
 	// database/sql says: "Who handles 'sqlite'?"
 	// modernc.org/sqlite raises its hand: "I do!"
 	// Connection established
-	_ "modernc.org/sqlite"
+	_ "github.com/lib/pq"
 )
 
 // DB is the global database connection
@@ -32,11 +32,11 @@ import (
 var DB *sql.DB
 
 // InitDB initializes the database connection and creates tables
-func InitDB(dbPath string) error {
+func InitDB(dsn string) error {
 	var err error
 
-	// Open SQLite database (creates file if not exists)
-	DB, err = sql.Open("sqlite", dbPath) // or ":memory:" as in-memory DB
+	// Open Postgres database using the connection string (DSN)
+	DB, err = sql.Open("postgres", dsn)
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func InitDB(dbPath string) error {
 		return err
 	}
 
-	slog.Info("Database connected", "path", dbPath)
+	slog.Info("Database connected", "path", dsn)
 
 	// Create tables
 	err = createTables()
@@ -63,10 +63,10 @@ func createTables() error {
 	// Users table - stores user accounts
 	usersTable := `
 	CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id SERIAL PRIMARY KEY,
 		email TEXT UNIQUE NOT NULL,
 		password_hash TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		created_at TIMESTAMP DEFAULT NOW()
 	);`
 
 	_, err := DB.Exec(usersTable)
@@ -77,12 +77,12 @@ func createTables() error {
 	// Entries table - stores mood/activity data
 	entriesTable := `
 	CREATE TABLE IF NOT EXISTS entries (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id SERIAL PRIMARY KEY,
 		user_id INTEGER NOT NULL,
 		text TEXT,
 		mood INTEGER,
 		category TEXT,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		created_at TIMESTAMP DEFAULT NOW()
 	);`
 
 	_, err = DB.Exec(entriesTable)
@@ -99,16 +99,11 @@ func createTables() error {
 // Takes 5 inputs: userID (which user), text (what they wrote), mood (their mood score), tags (list of tags), category (entry type)
 func InsertEntry(ctx context.Context, userID int, text string, mood int, category string) (int64, error) {
 	// The ? marks are placeholders (like blanks in a form)
-	query := `INSERT INTO entries (user_id, text, mood, category) VALUES (?, ?, ?, ?)`
-	// "Execute the query and fill in the ? marks with actual values."
-	result, err := DB.ExecContext(ctx, query, userID, text, mood, category)
-	if err != nil {
-		return 0, err
-	}
+	query := `INSERT INTO entries (user_id, text, mood, category) VALUES ($1, $2, $3, $4) RETURNING id`
 
-	// Get the ID of the inserted row
-	// "If something broke, return 0 as ID and the error message."
-	id, err := result.LastInsertId()
+	var id int64
+	err := DB.QueryRowContext(ctx, query, userID, text, mood, category).Scan(&id)
+	// "Execute the query and fill in the ? marks with actual values."
 	if err != nil {
 		return 0, err
 	}
@@ -122,23 +117,18 @@ func GetEntryByID(ctx context.Context, entryID int, userId int64) (*models.Entry
 
 	query := `SELECT id, user_id, text, mood, category, created_at
 				FROM entries
-				WHERE id = ? and user_id = ?
+				WHERE id = $1 and user_id = $2
 			`
 
 	var entry models.Entry
-	var createdAt string
 
 	row := DB.QueryRowContext(ctx, query, entryID, userId)
 
-	err := row.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
+	err := row.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &entry.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 
-	entry.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
-	if err != nil {
-		return nil, err
-	}
 	return &entry, nil
 }
 
@@ -166,15 +156,8 @@ func GetAllEntries(ctx context.Context) ([]models.Entry, error) {
 
 	for rows.Next() {
 		var entry models.Entry
-		var createdAt string
 
-		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
-		if err != nil {
-			return nil, err
-		}
-
-		entry.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
-
+		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &entry.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +173,7 @@ func GetAllEntries(ctx context.Context) ([]models.Entry, error) {
 func GetEntriesByUser(ctx context.Context, userID int64) ([]models.Entry, error) {
 	query := `SELECT id, user_id, text, mood, category, created_at
 	          FROM entries
-	          WHERE user_id = ?
+	          WHERE user_id = $1
 	          ORDER BY created_at DESC`
 
 	rows, err := DB.QueryContext(ctx, query, userID)
@@ -204,14 +187,8 @@ func GetEntriesByUser(ctx context.Context, userID int64) ([]models.Entry, error)
 	for rows.Next() {
 
 		var entry models.Entry
-		var createdAt string
 
-		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
-		if err != nil {
-			return nil, err
-		}
-
-		entry.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
+		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &entry.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -233,7 +210,7 @@ func GetEntriesByUserPaginated(ctx context.Context, userId int, page int, limit 
 		total, _ = strconv.Atoi(cachedCount) // Convert string to int (Redis stores strings)
 	} else {
 		// 3. Cache miss: query database
-		queryForCount := `SELECT COUNT(*) FROM entries WHERE user_id = ?`
+		queryForCount := `SELECT COUNT(*) FROM entries WHERE user_id = $1`
 		err := DB.QueryRowContext(ctx, queryForCount, userId).Scan(&total)
 
 		if err != nil {
@@ -246,9 +223,9 @@ func GetEntriesByUserPaginated(ctx context.Context, userId int, page int, limit 
 
 	queryForEntries := `SELECT id, user_id, text, mood, category, created_at
 	 FROM entries WHERE
-	 user_id = ?
+	 user_id = $1
 	 ORDER BY created_at DESC
-	 LIMIT ? OFFset ?
+	 LIMIT $2 OFFset $3
 	 `
 	rows, err := DB.QueryContext(ctx, queryForEntries, userId, limit, (page-1)*limit)
 
@@ -261,15 +238,8 @@ func GetEntriesByUserPaginated(ctx context.Context, userId int, page int, limit 
 	for rows.Next() {
 
 		var entry models.Entry
-		var createdAt string
 
-
-		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &createdAt)
-		if err != nil {
-			return nil, 0
-		}
-
-		entry.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
+		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &entry.CreatedAt)
 		if err != nil {
 			return nil, 0
 		}
@@ -282,14 +252,11 @@ func GetEntriesByUserPaginated(ctx context.Context, userId int, page int, limit 
 // CreateUser inserts a new user into the database
 // Takes email and hashed password (NOT plain password!)
 func CreateUser(ctx context.Context, email string, passwordHash string) (int64, error) {
-	query := `INSERT INTO users (email, password_hash) VALUES (?, ?)`
+	query := `INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id`
 
-	result, err := DB.ExecContext(ctx, query, email, passwordHash)
-	if err != nil {
-		return 0, err
-	}
+	var id int64
 
-	id, err := result.LastInsertId()
+	err := DB.QueryRowContext(ctx, query, email, passwordHash).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -301,7 +268,7 @@ func CreateUser(ctx context.Context, email string, passwordHash string) (int64, 
 // GetUserByEmail retrieves a user by their email
 // Returns user_id and password_hash for login verification
 func GetUserByEmail(ctx context.Context, email string) (int64, string, error) {
-	query := `SELECT id, password_hash FROM users WHERE email = ?`
+	query := `SELECT id, password_hash FROM users WHERE email = $1`
 
 	var userID int64
 	var passwordHash string
@@ -318,9 +285,10 @@ func GetUserByEmail(ctx context.Context, email string) (int64, string, error) {
 // Updates an entry only if it belongs to the authenticated user
 func UpdateEntry(ctx context.Context, entryId int, userID int64, text string, mood int, category string) (int64, error) {
 
-	query := `UPDATE entries SET text = ?, mood = ?, category = ? WHERE id = ? AND user_id = ?`
+	query := `UPDATE entries SET text = $1, mood = $2, category = $3 WHERE id = $4 AND user_id = $5`
 
 	// Parameters must match placeholder order: text, mood, category, id, user_id
+
 	result, err := DB.ExecContext(ctx, query, text, mood, category, entryId, userID)
 	if err != nil {
 		return 0, err
@@ -338,7 +306,7 @@ func UpdateEntry(ctx context.Context, entryId int, userID int64, text string, mo
 
 func DeleteEntry(ctx context.Context, entryId int, userID int64) (int64, error) {
 
-	query := `DELETE FROM ENTRIES WHERE id = ? and user_id = ?`
+	query := `DELETE FROM entries WHERE id = $1 and user_id = $2`
 
 	result, err := DB.ExecContext(ctx, query, entryId, userID)
 	if err != nil {

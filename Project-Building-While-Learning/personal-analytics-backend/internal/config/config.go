@@ -11,8 +11,12 @@ type Config struct {
 	// Server setting
 	Port string
 
-	// Database
-	DBPath string
+	// Database (PostgreSQL)
+	DBHost     string
+	DBPort     string
+	DBUser     string
+	DBPassword string
+	DBName     string
 
 	// Redis
 	RedisAddr string
@@ -52,9 +56,25 @@ func Load() (*Config, error) {
 	}
 
 	// Load DBPath (default : "./data.db")
-	cfg.DBPath = os.Getenv("DB_PATH")
-	if cfg.DBPath == "" {
-		cfg.DBPath = "./data.db"
+	cfg.DBHost = os.Getenv("DB_HOST")
+	if cfg.DBHost == "" {
+		cfg.DBHost = "localhost"
+	}
+	cfg.DBPort = os.Getenv("DB_PORT")
+	if cfg.DBPort == "" {
+		cfg.DBPort = "5432"
+	}
+	cfg.DBUser = os.Getenv("DB_USER")
+	if cfg.DBUser == "" {
+		cfg.DBUser = "user"
+	}
+	cfg.DBPassword = os.Getenv("DB_PASSWORD")
+	if cfg.DBPassword == "" {
+		cfg.DBPassword = "password"
+	}
+	cfg.DBName = os.Getenv("DB_NAME")
+	if cfg.DBName == "" {
+		cfg.DBName = "analytics"
 	}
 
 	// Load RedisAddr

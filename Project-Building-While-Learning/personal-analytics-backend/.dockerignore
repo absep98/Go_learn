@@ -1,0 +1,35 @@
+# Git
+
+.git
+.gitignore
+
+# Environment  (never copy secrets into images)
+
+.env
+
+# Test files and coverage reports
+
+**/*_test.go
+*.out
+coverage.txt
+
+# Local build artifacts
+
+*.exe
+server
+main.exe
+
+# Docker files themselves
+
+Dockerfile
+docker-compose.yml
+
+# Docs and non-code files
+
+docs/
+*.md
+README.md
+
+# IDE and OS files
+.vscode/
+.idea/

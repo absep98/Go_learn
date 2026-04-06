@@ -18,6 +18,9 @@ services:
     # This runs our 2-stage Dockerfile → produces the ~15MB Alpine image
     build: .
 
+    restart: on-failure
+    # restart: on-failure means "if the container crashes, restart it automatically"
+
     # Map host port → container port
     # Format: "HOST:CONTAINER"
     # "8080:8080" means: when you hit localhost:8080 on your machine,
@@ -36,11 +39,23 @@ services:
       # So "redis" resolves to the Redis container — not localhost.
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_NAME=dbname
 
     # Don't start this service until the redis service is running.
     # Prevents the app from crashing on startup because Redis isn't ready yet.
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+        # This means "wait until the redis service's healthcheck passes"
+        # before starting the app. Ensures Redis is fully ready before the app tries to connect.
+        # Note: depends_on with condition is only supported in version 2 of docker-compose files.
+        # In version 3, you would need to implement your own wait logic in the app or use a tool like wait-for-it.sh.
+      postgres:
+        condition: service_healthy
 
   # ---------------------------------------------------------------
   # SERVICE 2: Redis (rate limiting + caching)
@@ -55,3 +70,26 @@ services:
     # (useful for debugging with redis-cli directly)
     ports:
       - "6379:6379"
+
+  # ---------------------------------------------------------------
+  # SERVICE 3: Postgres (database)
+  # No Dockerfile needed — we use the official image directly from Docker Hub
+  # ---------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: dbname
+    ports:
+      - "5432:5432"
+    # Healthcheck to ensure Postgres is ready before the app tries to connect
+    healthcheck:
+      # Docker will run this command inside the container every 10 seconds
+      # to check if the app is healthy. If it fails, Docker marks the container
+      # as unhealthy, which can be used for auto-restart policies or just for
+      # your own monitoring.
+      test: [ "CMD-SHELL", "pg_isready -U user -d dbname" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
