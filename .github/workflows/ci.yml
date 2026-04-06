@@ -30,7 +30,7 @@ jobs:
           --health-cmd pg_isready
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 5s
+          --health-retries 5
 
     # All steps run from inside the backend directory.
     # The backend has its own go.mod so Go commands must run from there.
