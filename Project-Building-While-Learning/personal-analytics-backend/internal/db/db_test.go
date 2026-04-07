@@ -4,28 +4,29 @@ package db
 === DB PACKAGE TESTS ===
 
 WHAT WE ARE TESTING:
-CRUD operations on SQLite — InsertEntry, GetEntryByID, GetAllEntries, UpdateEntry, DeleteEntry.
-All tests run against an in-memory SQLite database (":memory:") — no file created, no production data touched.
+CRUD operations on Postgres — InsertEntry, GetEntryByID, GetAllEntries, UpdateEntry, DeleteEntry.
+All tests run against a real Postgres database configured via env vars — no production data touched.
 
 KEY CONCEPTS USED:
 
 1. TestMain — PACKAGE-LEVEL SETUP
    func TestMain(m *testing.M) runs ONCE before all tests in this package.
-   We use it to initialize the in-memory DB and create tables.
+   We use it to connect to Postgres, truncate tables for a clean state, and run all tests.
    m.Run() is where all TestXxx functions actually execute.
    Without calling m.Run(), no tests run at all.
 
+   If DB_HOST is not set (e.g. local dev without Postgres), the tests are skipped entirely
+   via os.Exit(0). This avoids false failures when Postgres isn't available.
+
    Why not just call InitDB() inside each test?
-   Each call would create a new DB and tables — slow and redundant.
+   Each call would open a new connection pool — slow and redundant.
    TestMain runs once, all tests share the same DB instance.
 
-2. IN-MEMORY SQLITE (":memory:")
-   InitDB(":memory:") creates a DB that lives only in RAM.
-   It's empty at start, fast, and disappears when tests finish.
-   Why not use the production data.db?
-   - Tests insert/delete rows — would corrupt real user data
-   - Tests need a known state — production DB has unknown existing rows
-   - In-memory DB is isolated and reproducible every run
+2. WHY TRUNCATE BEFORE TESTS
+   Unlike SQLite :memory: (which starts empty every run), Postgres persists data between runs.
+   TRUNCATE TABLE entries, users RESTART IDENTITY CASCADE wipes all rows and resets
+   auto-increment IDs to 1 — ensuring a known, clean state before every test run.
+   CASCADE handles the foreign key from entries → users.
 
 3. SHARED DB STATE ACROSS TESTS
    All tests share the same DB instance from TestMain.
@@ -49,19 +50,39 @@ A: InsertEntry returns int64. GetEntryByID expects int.
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
+
+	_ "github.com/lib/pq"
 )
 
 func TestMain(m *testing.M) {
-	// setup : init in-memory db
+	host := os.Getenv("DB_HOST")
 
-	err := InitDB(":memory:")
+	if host == "" {
+		fmt.Println("DB_HOST not set, skipping DB tests")
+		os.Exit(0)
+	}
 
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host,
+		os.Getenv("DB_PORT"),
+		os.Getenv("DB_USER"),
+		os.Getenv("DB_PASSWORD"),
+		os.Getenv("DB_NAME"),
+	)
+
+	err := InitDB(dsn)
 	if err != nil {
 		panic("failed to init test DB: " + err.Error())
 	}
 
+	_, err = DB.Exec("TRUNCATE TABLE entries, users RESTART IDENTITY CASCADE")
+
+	if err != nil {
+		panic("failed to clean test DB: " + err.Error())
+	}
 	// run all tests
 	os.Exit(m.Run())
 }
@@ -105,7 +126,7 @@ func TestGetEntryByID(t *testing.T) {
 
 func TestGetEntryByID_NotFound(t *testing.T) {
 
-	entry, err := GetEntryByID(context.Background() ,9999, 1)
+	entry, err := GetEntryByID(context.Background(), 9999, 1)
 
 	if err == nil {
 		t.Errorf("expected error for missing entry, got nil")
