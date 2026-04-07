@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log/slog"
     "net/http"
 )
 
@@ -22,5 +23,7 @@ func GetMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Step 4: Encode data as JSON using json.NewEncoder(w).Encode(data)
-	json.NewEncoder(w).Encode(getMetricsSnapshot)
+	if err := json.NewEncoder(w).Encode(getMetricsSnapshot); err != nil {
+		slog.Error("failed to encode metrics response", "error", err)
+	}
 }

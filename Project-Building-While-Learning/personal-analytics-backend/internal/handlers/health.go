@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/redis"
@@ -45,5 +46,7 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send JSON response
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.Error("failed to encode health response", "error", err)
+	}
 }

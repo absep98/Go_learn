@@ -19,7 +19,9 @@ func TestValidRegisteration(t *testing.T) {
 	Register(rec, req)
 
 	var resp RegisterResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if !resp.Success {
 		t.Errorf("expected succes true, got false")
@@ -41,7 +43,9 @@ func TestRegisteration_EmailMissing(t *testing.T) {
 	Register(rec, req)
 
 	var resp RegisterResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp.Success == true {
 		t.Errorf("expected succes true, got false")
@@ -63,7 +67,9 @@ func TestRegisteration_ShortPassword(t *testing.T) {
 	Register(rec, req)
 
 	var resp RegisterResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp.Success == true {
 		t.Errorf("expected succes true, got false")
@@ -85,7 +91,9 @@ func TestValidRegisterationDuplicate(t *testing.T) {
 	Register(rec, req)
 
 	var resp RegisterResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp.Success {
 		t.Errorf("expected succes false for duplicate email")
@@ -107,7 +115,9 @@ func TestValidLogin(t *testing.T) {
 	Register(rec, req)
 
 	var resp RegisterResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if !resp.Success {
 		t.Errorf("expected success true, got false")
@@ -127,7 +137,9 @@ func TestValidLogin(t *testing.T) {
 	Login(rec, req)
 
 	var loginResp LoginResponse
-	json.NewDecoder(rec.Body).Decode(&loginResp)
+	if err := json.NewDecoder(rec.Body).Decode(&loginResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if !loginResp.Success {
 		t.Errorf("expected success true, got false")
@@ -147,7 +159,9 @@ func TestLogin_WrongPassword(t *testing.T) {
 	Register(rec, req)
 
 	var resp RegisterResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 	if !resp.Success {
 		t.Fatalf("setup failed: could not register user: %s", resp.Message)
 	}
@@ -160,7 +174,9 @@ func TestLogin_WrongPassword(t *testing.T) {
 	Login(rec, req)
 
 	var loginResp LoginResponse
-	json.NewDecoder(rec.Body).Decode(&loginResp)
+	if err := json.NewDecoder(rec.Body).Decode(&loginResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if loginResp.Success {
 		t.Errorf("expected success false for wrong password")
@@ -182,7 +198,9 @@ func TestLogin_NonExistentEmail(t *testing.T) {
 	Login(rec, req)
 
 	var loginResp LoginResponse
-	json.NewDecoder(rec.Body).Decode(&loginResp)
+	if err := json.NewDecoder(rec.Body).Decode(&loginResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if loginResp.Success {
 		t.Errorf("expected success false for non-existent email")

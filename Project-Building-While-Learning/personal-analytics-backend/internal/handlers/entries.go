@@ -221,7 +221,9 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	// set the response code 200, 400 etc
 	w.WriteHeader(status)
 	// Covert our go struct to json and send it to client
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
 }
 
 func UpdateEntry(w http.ResponseWriter, r *http.Request) {

@@ -60,6 +60,7 @@ func TestClosedToOpen(t *testing.T) {
 
 	// call Execute 5 times with a failing operation
 	for i := 0; i < 5; i++ {
+		//nolint:errcheck // intentionally ignoring errors to trip the breaker
 		cb.Execute(func() error {
 			return fmt.Errorf("service down")
 		})
@@ -83,6 +84,7 @@ func TestOpenRejectsImmediately(t *testing.T) {
 	cb := NewCircuitBreaker(5, 30*time.Second)
 
 	for i := 0; i < 5; i++ {
+		//nolint:errcheck // intentionally ignoring errors to trip the breaker
 		cb.Execute(func() error {
 			return fmt.Errorf("service down")
 		})
@@ -110,17 +112,20 @@ func TestClosedResetsOnSuccess(t *testing.T) {
 	// 4 failures
 
 	for i := 0; i < 4; i++ {
+		//nolint:errcheck // intentionally ignoring errors to trip the breaker
 		cb.Execute(func() error {
 			return fmt.Errorf("service down")
 		})
 	}
 	// 1 success
 
+	//nolint:errcheck // intentionally ignoring success result
 	cb.Execute(func() error {
 		return nil
 	})
 	// 4 more failures
 	for i := 0; i < 4; i++ {
+		//nolint:errcheck // intentionally ignoring errors to trip the breaker
 		cb.Execute(func() error {
 			return fmt.Errorf("service down")
 		})

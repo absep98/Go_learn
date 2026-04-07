@@ -49,6 +49,7 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/lib/pq"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -110,7 +111,9 @@ func TestCreateEntry(t *testing.T) {
 	CreateEntry(rec, req)
 
 	var resp CreateEntryResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if !resp.Success {
 		t.Errorf("expected success true, got false")
@@ -138,7 +141,9 @@ func TestCreateEntry_MissingText(t *testing.T) {
 	CreateEntry(rec, req)
 
 	var resp CreateEntryResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp.Success == true {
 		t.Errorf("expected success false but got true")
@@ -162,7 +167,9 @@ func TestCreateEntry_InvalidMood(t *testing.T) {
 	CreateEntry(rec, req)
 
 	var resp CreateEntryResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp.Success == true {
 		t.Errorf("expected success false but got true")
@@ -194,8 +201,9 @@ func TestGetEntries(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp["success"] != true {
 		t.Errorf("expected success true, got %v", resp["success"])
@@ -219,8 +227,9 @@ func TestGetEntries_Empty(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp["success"] != true {
 		t.Errorf("expected success true, got %v", resp["success"])
@@ -248,8 +257,9 @@ func TestUpdateEntry(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp["success"] != true {
 		t.Errorf("expected success true, got %v", resp["success"])
@@ -275,8 +285,9 @@ func TestUpdateEntry_NotFound(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp["success"] != false {
 		t.Errorf("expected success false")
@@ -303,8 +314,9 @@ func TestUpdateEntry_MissingText(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if resp["success"] != false {
 		t.Errorf("expected success false")

@@ -36,6 +36,7 @@ func Get(key string) (string, bool) {
 // Set stores a value in Redis with TTL (auto-expires)
 func Set(key string, value interface{}, ttl time.Duration) {
 	// Redis Set automatically handles expiration via ttl parameter
+	//nolint:errcheck // cache is best-effort; circuit breaker handles Redis failures
 	RedisBreaker.Execute(func() error {
 		return redis.Client.Set(context.Background(), key, value, ttl).Err()
 	})
@@ -45,6 +46,7 @@ func Set(key string, value interface{}, ttl time.Duration) {
 // Delete removes a key from Redis
 func Delete(key string) {
 	// Del = delete command in Redis
+	//nolint:errcheck // cache is best-effort; circuit breaker handles Redis failures
 	RedisBreaker.Execute(func() error {
 		return redis.Client.Del(context.Background(), key).Err()
 	})
