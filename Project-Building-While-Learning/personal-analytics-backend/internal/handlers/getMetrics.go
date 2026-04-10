@@ -3,9 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"log/slog"
-    "net/http"
+	"net/http"
 )
-
 
 func GetMetrics(w http.ResponseWriter, r *http.Request) {
 

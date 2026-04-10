@@ -199,6 +199,56 @@ func GetEntriesByUser(ctx context.Context, userID int64) ([]models.Entry, error)
 	return entries, nil
 }
 
+func GetAllEntriesPaginated(ctx context.Context, userID int64, limit int, offset int) ([]models.Entry, error) {
+
+	if limit < 1 {
+		limit = 10
+	}
+	queryData := `SELECT id, user_id, text, mood, category, created_at
+		FROM entries WHERE
+		user_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := DB.QueryContext(ctx, queryData, userID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var entries []models.Entry
+
+	for rows.Next() {
+
+		var entry models.Entry
+
+		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &entry.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func GetEntryCount(ctx context.Context, userID int64) (int, error) {
+
+	query := `SELECT COUNT(*) FROM entries WHERE user_id = $1`
+
+	var count int
+	err := DB.QueryRowContext(ctx, query, userID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
 // GetEntriesByUserPaginated allow users to paginate through entries instead of getting all at once.
 func GetEntriesByUserPaginated(ctx context.Context, userId int, page int, limit int) (entries []models.Entry, total int) {
 

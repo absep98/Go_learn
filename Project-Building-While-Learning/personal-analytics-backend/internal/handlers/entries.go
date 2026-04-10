@@ -187,15 +187,34 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	slog.Debug("Fetching entries", "user_id", userID, "page", page, "limit", limit)
 
+	offset := (page - 1) * limit
+
 	// Get entries for this user only
 	// Note: int(userID) converts int64 to int to match function signature
-	entries, total := db.GetEntriesByUserPaginated(r.Context(), int(userID), page, limit)
+	entries, err := db.GetAllEntriesPaginated(r.Context(), userID, limit, offset)
+
+	if err != nil {
+		slog.Error("failed to get entres", "error", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "Failed to fetch entries",
+		})
+		return
+	}
 
 	// Handle empty case - return empty array instead of null
 	if entries == nil {
 		entries = []models.Entry{}
 	}
 
+	total, err := db.GetEntryCount(r.Context(), userID)
+
+	if err != nil {
+		slog.Error("failed to get entry count", "error", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "Failed to fetch entry count",
+		})
+		return
+	}
 	// Calculate total pages using integer ceiling division
 	// Formula: (total + limit - 1) / limit
 	// Example: 25 total, limit 10 → (25 + 10 - 1) / 10 = 34 / 10 = 3 pages

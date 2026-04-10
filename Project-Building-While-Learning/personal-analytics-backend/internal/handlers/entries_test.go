@@ -352,3 +352,79 @@ func TestDeleteEntry_NotFound(t *testing.T) {
 		t.Errorf("expected 404, got %d", rec.Code)
 	}
 }
+
+func TestGetEntries_Pagination_Default(t *testing.T) {
+
+	// Setup: Insert 2 entries
+	// Every call inserts a new row with a different auto inc ID. There's no uniqueness constraint on text or mood only email in the user table in unique
+	createTestEntry(t)
+	createTestEntry(t)
+
+	// requesting
+	req := httptest.NewRequest(http.MethodGet, "/entries", nil)
+	ctx := context.WithValue(req.Context(), userIDKey, int64(1))
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	GetEntries(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["page"] != float64(1) {
+		t.Errorf("expected 1, got %v", resp["page"])
+	}
+
+	if resp["limit"] != float64(10) {
+		t.Errorf("expected 10, got %v", resp["limit"])
+	}
+
+	if resp["success"] != true {
+		t.Errorf("expected success true, got %v", resp["success"])
+	}
+
+	if resp["total"] == nil {
+		t.Errorf("expected total field in response")
+	}
+}
+
+func TestGetEntries_Pagination_WithParams(t *testing.T) {
+	// Insert 3 entries for user 1
+	createTestEntry(t)
+	createTestEntry(t)
+	createTestEntry(t)
+
+	// request page=1 and limit = 2
+	req := httptest.NewRequest(http.MethodGet, "/entries?page=1&limit=2", nil)
+	ctx := context.WithValue(req.Context(), userIDKey, int64(1))
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	GetEntries(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	var resp map[string]interface{}
+
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["limit"] != float64(2) {
+		t.Errorf("expected 2, but got %d", resp["limit"])
+	}
+
+	entries := resp["entries"].([]interface{})
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+
+}
