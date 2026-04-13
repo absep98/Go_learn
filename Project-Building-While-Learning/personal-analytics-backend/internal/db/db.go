@@ -5,10 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"personal-analytics-backend/internal/cache"
 	"personal-analytics-backend/internal/models"
-	"strconv"
-	"time"
 
 	// The underscore _ means "blank import"
 	// // You DON'T call any functions from it
@@ -247,56 +244,6 @@ func GetEntryCount(ctx context.Context, userID int64) (int, error) {
 	}
 
 	return count, nil
-}
-
-// GetEntriesByUserPaginated allow users to paginate through entries instead of getting all at once.
-func GetEntriesByUserPaginated(ctx context.Context, userId int, page int, limit int) (entries []models.Entry, total int) {
-
-	// 1. Build cache key
-	cacheKey := fmt.Sprintf("count:user:%d", userId)
-
-	// 2. Try to get from cache
-	if cachedCount, found := cache.Get(cacheKey); found {
-		total, _ = strconv.Atoi(cachedCount) // Convert string to int (Redis stores strings)
-	} else {
-		// 3. Cache miss: query database
-		queryForCount := `SELECT COUNT(*) FROM entries WHERE user_id = $1`
-		err := DB.QueryRowContext(ctx, queryForCount, userId).Scan(&total)
-
-		if err != nil {
-			return nil, 0
-		}
-
-		// 4. Store in cache for 60 seconds
-		cache.Set(cacheKey, total, 60*time.Second)
-	}
-
-	queryForEntries := `SELECT id, user_id, text, mood, category, created_at
-	 FROM entries WHERE
-	 user_id = $1
-	 ORDER BY created_at DESC
-	 LIMIT $2 OFFset $3
-	 `
-	rows, err := DB.QueryContext(ctx, queryForEntries, userId, limit, (page-1)*limit)
-
-	if err != nil {
-		return nil, 0
-	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-
-		var entry models.Entry
-
-		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &entry.CreatedAt)
-		if err != nil {
-			return nil, 0
-		}
-
-		entries = append(entries, entry)
-	}
-	return entries, total
 }
 
 func GetEntriesFiltered(ctx context.Context, userID int64, category string, moodMin int, limit int, offset int) ([]models.Entry, error) {
