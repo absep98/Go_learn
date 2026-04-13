@@ -216,3 +216,89 @@ func TestDeleteEntry(t *testing.T) {
 	}
 
 }
+
+func TestGetAllEntriesPaginated(t *testing.T) {
+
+	// Insert 3 entries for userID=1
+	InsertEntry(context.Background(), 1, "entry 1", 5, "mood")
+	InsertEntry(context.Background(), 1, "entry 2", 6, "mood")
+	InsertEntry(context.Background(), 1, "entry 3", 7, "mood")
+
+	// Page 1: limit=2, offset=0 → should return 2 entries
+	entries, err := GetAllEntriesPaginated(context.Background(), 1, 2, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+
+	// Page 2: limit=2, offset=2 → should return at least 1 entry
+	entries2, err := GetAllEntriesPaginated(context.Background(), 1, 2, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries2) < 1 {
+		t.Errorf("expected at least 1 entry on page 2, got %d", len(entries2))
+	}
+}
+
+func TestGetEntryCount(t *testing.T) {
+
+	InsertEntry(context.Background(), 200, "test", 5, "mood")
+	InsertEntry(context.Background(), 200, "test", 5, "mood")
+
+	count, err := GetEntryCount(context.Background(), 200)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count < 2 {
+		t.Errorf("expected at least 2, got %d", count)
+	}
+
+	// userID with no entries should return 0
+	count2, err := GetEntryCount(context.Background(), 9999)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count2 != 0 {
+		t.Errorf("expected 0, got %d", count2)
+	}
+
+}
+
+func TestGetFilteredByCategory(t *testing.T) {
+
+	InsertEntry(context.Background(), 300, "test", 5, "mood")
+	InsertEntry(context.Background(), 300, "test", 5, "mood")
+	InsertEntry(context.Background(), 300, "test", 5, "work")
+
+	entries, err := GetEntriesFiltered(context.Background(), 300, "mood", 0, 10, 0)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Errorf("Filtered operation didn't returned the correct entries data")
+	}
+}
+
+func TestGetFilteredByMoodMin(t *testing.T) {
+	//nolint:errcheck
+	InsertEntry(context.Background(), 400, "low mood", 5, "mood")
+	//nolint:errcheck
+	InsertEntry(context.Background(), 400, "mid mood", 7, "mood")
+	//nolint:errcheck
+	InsertEntry(context.Background(), 400, "high mood", 9, "mood")
+
+	entries, err := GetEntriesFiltered(context.Background(), 400, "", 7, 10, 0)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries with mood >= 7 and got %d", len(entries))
+	}
+}

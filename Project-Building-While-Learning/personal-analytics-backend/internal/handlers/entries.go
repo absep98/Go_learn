@@ -189,9 +189,23 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	offset := (page - 1) * limit
 
-	// Get entries for this user only
-	// Note: int(userID) converts int64 to int to match function signature
-	entries, err := db.GetAllEntriesPaginated(r.Context(), userID, limit, offset)
+	category := r.URL.Query().Get("category")
+
+	moodMin := 0
+	if moodMinStr := r.URL.Query().Get("mood_min"); moodMinStr != "" {
+		if m, err := strconv.Atoi(moodMinStr); err == nil && m > 0 {
+			moodMin = m
+		}
+	}
+
+	var entries []models.Entry
+	var err error
+
+	if category != "" || moodMin > 0 {
+		entries, err = db.GetEntriesFiltered(r.Context(), userID, category, moodMin, limit, offset)
+	} else {
+		entries, err = db.GetAllEntriesPaginated(r.Context(), userID, limit, offset)
+	}
 
 	if err != nil {
 		slog.Error("failed to get entres", "error", err)

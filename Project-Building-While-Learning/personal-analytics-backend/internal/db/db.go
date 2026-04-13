@@ -299,6 +299,55 @@ func GetEntriesByUserPaginated(ctx context.Context, userId int, page int, limit 
 	return entries, total
 }
 
+func GetEntriesFiltered(ctx context.Context, userID int64, category string, moodMin int, limit int, offset int) ([]models.Entry, error) {
+
+	query := `SELECT id, user_id, text, mood, category, created_at FROM entries WHERE user_id = $1`
+	args := []interface{}{userID}
+	paramCount := 1
+
+	if category != "" {
+		paramCount++
+		query += fmt.Sprintf(" AND category = $%d", paramCount)
+		args = append(args, category)
+	}
+
+	if moodMin > 0 {
+		paramCount++
+		query += fmt.Sprintf(" AND mood >= $%d", paramCount)
+		args = append(args, moodMin)
+	}
+
+	paramCount++
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", paramCount)
+	args = append(args, limit)
+
+	paramCount++
+	query += fmt.Sprintf(" OFFSET $%d", paramCount)
+	args = append(args, offset)
+
+	rows, err := DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var entries []models.Entry
+	for rows.Next() {
+		var entry models.Entry
+		err := rows.Scan(&entry.ID, &entry.UserID, &entry.Text, &entry.Mood, &entry.Category, &entry.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 // CreateUser inserts a new user into the database
 // Takes email and hashed password (NOT plain password!)
 func CreateUser(ctx context.Context, email string, passwordHash string) (int64, error) {

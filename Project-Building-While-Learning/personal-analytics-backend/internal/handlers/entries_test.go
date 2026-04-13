@@ -419,7 +419,7 @@ func TestGetEntries_Pagination_WithParams(t *testing.T) {
 	}
 
 	if resp["limit"] != float64(2) {
-		t.Errorf("expected 2, but got %d", resp["limit"])
+		t.Errorf("expected 2, but got %v", resp["limit"])
 	}
 
 	entries := resp["entries"].([]interface{})
