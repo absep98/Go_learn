@@ -81,4 +81,4 @@ jobs:
         with:
           version: latest
           working-directory: Project-Building-While-Learning/personal-analytics-backend
-        continue-on-error: true
+          args: ./internal/... ./cmd/...

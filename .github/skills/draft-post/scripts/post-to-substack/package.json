@@ -1,0 +1,18 @@
+{
+  "name": "post-to-substack",
+  "version": "1.0.0",
+  "description": "Post articles and notes to Substack via substack-api",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "substack-api": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}

@@ -10,6 +10,7 @@ import (
 	"personal-analytics-backend/internal/models"
 	"personal-analytics-backend/internal/worker"
 	"strconv"
+	"time"
 )
 
 // CreateEntryRequest represents the incoming request body
@@ -115,6 +116,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 
 	// reason to delete as if existing data is there its now stale as we created newly this is called the cache invalidaton.
 	cache.Delete(fmt.Sprintf("count:user:%d", userID))
+	cache.Delete(fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
 
 	// Add background job to process this entry (async)
 	// This returns immediately - worker processes it in background
@@ -198,6 +200,22 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// building cacheKey
+	cacheKey := fmt.Sprintf("entries:user:%d:page:%d:limit:%d", userID, page, limit)
+
+	if category == "" && moodMin == 0 {
+		// Get from cache - two return values
+		cached, found := cache.Get(cacheKey)
+
+		// if found - write raw JSON to response, return
+		if found {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, cached)
+			return
+		}
+
+	}
 	var entries []models.Entry
 	var err error
 
@@ -234,16 +252,24 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 	// Example: 25 total, limit 10 → (25 + 10 - 1) / 10 = 34 / 10 = 3 pages
 	totalPages := (total + limit - 1) / limit
 
-	// Success response with entries and pagination metadata
-	slog.Info("Entries returned", "count", len(entries), "user_id", userID, "page", page, "total_pages", totalPages)
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	responseData := map[string]interface{}{
 		"success":    true,
 		"entries":    entries,
 		"page":       page,
 		"limit":      limit,
 		"total":      total,
 		"totalPages": totalPages,
-	})
+	}
+
+	if category == "" && moodMin == 0 {
+		if data, err := json.Marshal(responseData); err == nil {
+			cache.Set(cacheKey, string(data), 60*time.Second)
+		}
+	}
+
+	// Success response with entries and pagination metadata
+	slog.Info("Entries returned", "count", len(entries), "user_id", userID, "page", page, "total_pages", totalPages)
+	respondJSON(w, http.StatusOK, responseData)
 }
 
 // Helper function to send JSON responses
@@ -321,7 +347,9 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusNotFound, "Entry not found or access denied")
 		return
 	}
+
 	cache.Delete(fmt.Sprintf("count:user:%d", userID))
+	cache.Delete(fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
 
 	// Success response
 	slog.Info("Entry updated", "entry_id", entryId, "user_id", userID)
@@ -373,6 +401,7 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cache.Delete(fmt.Sprintf("count:user:%d", userID))
+	cache.Delete(fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
 	slog.Info("Entry deleted", "entry_id", entryId, "user_id", userID)
 	respondJSON(w, http.StatusOK, CreateEntryResponse{
 		Success: true,
