@@ -245,8 +245,8 @@ func TestGetAllEntriesPaginated(t *testing.T) {
 
 func TestGetEntryCount(t *testing.T) {
 
-	InsertEntry(context.Background(), 200, "test", 5, "mood")
-	InsertEntry(context.Background(), 200, "test", 5, "mood")
+	InsertEntry(context.Background(), 200, "test", 5, "mood") //nolint:errcheck
+	InsertEntry(context.Background(), 200, "test", 5, "mood") //nolint:errcheck
 
 	count, err := GetEntryCount(context.Background(), 200)
 	if err != nil {
@@ -269,9 +269,9 @@ func TestGetEntryCount(t *testing.T) {
 
 func TestGetFilteredByCategory(t *testing.T) {
 
-	InsertEntry(context.Background(), 300, "test", 5, "mood")
-	InsertEntry(context.Background(), 300, "test", 5, "mood")
-	InsertEntry(context.Background(), 300, "test", 5, "work")
+	InsertEntry(context.Background(), 300, "test", 5, "mood") //nolint:errcheck
+	InsertEntry(context.Background(), 300, "test", 5, "mood") //nolint:errcheck
+	InsertEntry(context.Background(), 300, "test", 5, "work") //nolint:errcheck
 
 	entries, err := GetEntriesFiltered(context.Background(), 300, "mood", 0, 10, 0)
 
@@ -285,12 +285,9 @@ func TestGetFilteredByCategory(t *testing.T) {
 }
 
 func TestGetFilteredByMoodMin(t *testing.T) {
-	//nolint:errcheck
-	InsertEntry(context.Background(), 400, "low mood", 5, "mood")
-	//nolint:errcheck
-	InsertEntry(context.Background(), 400, "mid mood", 7, "mood")
-	//nolint:errcheck
-	InsertEntry(context.Background(), 400, "high mood", 9, "mood")
+	InsertEntry(context.Background(), 400, "low mood", 5, "mood")  //nolint:errcheck
+	InsertEntry(context.Background(), 400, "mid mood", 7, "mood")  //nolint:errcheck
+	InsertEntry(context.Background(), 400, "high mood", 9, "mood") //nolint:errcheck
 
 	entries, err := GetEntriesFiltered(context.Background(), 400, "", 7, 10, 0)
 
