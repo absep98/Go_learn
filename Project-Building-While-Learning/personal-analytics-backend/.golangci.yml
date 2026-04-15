@@ -5,6 +5,4 @@ issues:
   exclude-dirs:
     - learning-demos
 
-linters-settings:
-  govet:
-    shadow: false
+
