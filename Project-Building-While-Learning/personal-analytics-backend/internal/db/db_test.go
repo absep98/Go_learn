@@ -220,9 +220,9 @@ func TestDeleteEntry(t *testing.T) {
 func TestGetAllEntriesPaginated(t *testing.T) {
 
 	// Insert 3 entries for userID=1
-	InsertEntry(context.Background(), 1, "entry 1", 5, "mood")
-	InsertEntry(context.Background(), 1, "entry 2", 6, "mood")
-	InsertEntry(context.Background(), 1, "entry 3", 7, "mood")
+	InsertEntry(context.Background(), 1, "entry 1", 5, "mood") //nolint:errcheck
+	InsertEntry(context.Background(), 1, "entry 2", 6, "mood") //nolint:errcheck
+	InsertEntry(context.Background(), 1, "entry 3", 7, "mood") //nolint:errcheck
 
 	// Page 1: limit=2, offset=0 → should return 2 entries
 	entries, err := GetAllEntriesPaginated(context.Background(), 1, 2, 0)
