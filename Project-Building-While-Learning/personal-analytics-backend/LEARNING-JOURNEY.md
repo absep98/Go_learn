@@ -130,13 +130,58 @@ Watching SQL injection delete an entire table made security concepts concrete. N
 
 ### 2. Middleware Pattern
 
-**What clicked:** Middleware is like a security checkpoint. Request comes in, middleware checks it, then passes it to the actual handler.
+**What clicked:** Middleware is like Russian dolls. The outermost runs first, calls the next one inside, all the way to the actual handler. Response travels back out the same way.
 
 ```go
-LoggingMiddleware(AuthMiddleware(ActualHandler))
+RequestIDMiddleware(
+  TimeoutMiddleware(
+    MetricsMiddleware(
+      RateLimitMiddleware(
+        LoggingMiddleware(
+          AuthMiddleware(
+            UserRateLimitMiddleware(
+              handler  ← innermost
+            )))))))
 ```
 
-This composition is powerful—can add features without changing handler code.
+**Request travels IN (outside → inside):**
+1. `RequestIDMiddleware` → generates "abc123", adds to context
+2. `TimeoutMiddleware` → starts 30s timer, 503 if handler takes too long
+3. `MetricsMiddleware` → records "request started"
+4. `RateLimitMiddleware` → checks `ratelimit:192.168.1.1` in Redis (IP-based)
+5. `LoggingMiddleware` → logs "GET /entries started", starts timer
+6. `AuthMiddleware` → validates JWT, extracts userID=42, adds to context
+7. `UserRateLimitMiddleware` → checks `ratelimit:user:42` in Redis (per-user)
+8. `handler` → runs business logic, returns JSON
+
+**Response travels OUT (inside → outside):**
+- Handler writes 200 + JSON
+- Logging logs "completed 200 in 12ms" ← has duration now because it runs on the way out
+- Metrics records "request completed"
+- Others return without doing anything extra
+
+**The key rule — order matters because of dependencies:**
+- `RequestID` must be outermost so every log below it has the request ID
+- `Auth` must be before `UserRateLimit` because UserRateLimit reads `userID` from context that Auth sets
+- If you put `UserRateLimit` outside `Auth`, userID is nil → every request gets 401
+
+**Each middleware follows the same structure:**
+```go
+func SomeMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // runs on the way IN
+        doSomethingBefore()
+
+        next(w, r)  // calls the next layer
+
+        // runs on the way OUT (after handler returns)
+        doSomethingAfter()
+    }
+}
+```
+If you `return` before `next(w, r)` → request is short-circuited, handler never runs (what RateLimit and Auth do when they reject).
+
+This composition is powerful — can add features without changing handler code.
 
 ### 3. Context for Passing Data
 

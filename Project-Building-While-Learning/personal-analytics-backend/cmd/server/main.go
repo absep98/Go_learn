@@ -124,21 +124,22 @@ func main() {
 	// Entries endpoints (PROTECTED - requires authentication)
 	http.HandleFunc("/entries", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
-			handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodPost {
-					handlers.CreateEntry(w, r)
-				} else if r.Method == http.MethodGet {
-					handlers.GetEntries(w, r)
-				} else if r.Method == http.MethodPatch {
-					// PATCH /entries?id=5 - Update an entry
-					handlers.UpdateEntry(w, r)
-				} else if r.Method == http.MethodDelete {
-					// Delete /entries?id=5 - Delete an entry
-					handlers.DeleteEntry(w, r)
-				} else {
-					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-				}
-			})))))))
+			handlers.AuthMiddleware(
+				handlers.UserRateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodPost {
+						handlers.CreateEntry(w, r)
+					} else if r.Method == http.MethodGet {
+						handlers.GetEntries(w, r)
+					} else if r.Method == http.MethodPatch {
+						// PATCH /entries?id=5 - Update an entry
+						handlers.UpdateEntry(w, r)
+					} else if r.Method == http.MethodDelete {
+						// Delete /entries?id=5 - Delete an entry
+						handlers.DeleteEntry(w, r)
+					} else {
+						http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+					}
+				}))))))))
 
 	http.HandleFunc("/metrics", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(

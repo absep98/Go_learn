@@ -45,6 +45,7 @@ See: System design Questions/Day18-Rate-Limiting.md for more details
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"personal-analytics-backend/internal/redis"
@@ -129,6 +130,33 @@ func RateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// 3. If allowed, call next handler
+		next(w, r)
+	}
+}
+
+var (
+	UserRateLimitRequests = 200
+	UserRateLimitWindow   = time.Minute
+)
+
+func UserRateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get identifier - using userID
+		val := r.Context().Value(userIDKey)
+
+		userID, ok := val.(int64)
+		if !ok {
+			errorResponse(w, http.StatusUnauthorized, "User not authenticated")
+			return
+		}
+
+		key := fmt.Sprintf("user:%d", userID)
+
+		if !IsAllowed(key, UserRateLimitRequests, UserRateLimitWindow) {
+			http.Error(w, "Rate limit exceeded. Try again later.", http.StatusTooManyRequests)
+			return
+		}
+
 		next(w, r)
 	}
 }
