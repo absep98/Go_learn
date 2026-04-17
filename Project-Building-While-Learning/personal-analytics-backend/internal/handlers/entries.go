@@ -121,8 +121,13 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 	// Add background job to process this entry (async)
 	// This returns immediately - worker processes it in background
 	worker.AddJob("entry_created", map[string]interface{}{
-		"entry_id": id,
-		"user_id":  userID,
+		"event":     "entry_created",
+		"entry_id":  id,
+		"user_id":   userID,
+		"text":      req.Text,
+		"mood":      req.Mood,
+		"category":  req.Category,
+		"timestamp": time.Now().UTC(),
 	})
 
 	// All above are checks if passed then only allow to save it
@@ -402,10 +407,18 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 
 	cache.Delete(fmt.Sprintf("count:user:%d", userID))
 	cache.Delete(fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
+
+	worker.AddJob("entry_deleted", map[string]interface{}{
+		"event":     "entry_deleted",
+		"entry_id":  entryId,
+		"user_id":   userID,
+		"timestamp": time.Now().UTC(),
+	})
+
 	slog.Info("Entry deleted", "entry_id", entryId, "user_id", userID)
+
 	respondJSON(w, http.StatusOK, CreateEntryResponse{
 		Success: true,
 		Message: "Entry deleted successfully",
 	})
-
 }

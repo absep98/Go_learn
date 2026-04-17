@@ -27,37 +27,38 @@
 - Request timeout middleware (context.WithTimeout, 504 on slow handlers)
 - Retry with exponential backoff (generic higher-order function)
 - Circuit breaker (3-state machine: closed -> open -> half-open)
+- Per-user rate limiting (UserRateLimitMiddleware, Redis key per user ID)
+
+### Tier 5: Containerization
+- Multi-stage Docker build (~15MB final image, CGO_ENABLED=0)
+- docker-compose with 3 services: app, postgres:16-alpine, redis:alpine
+- Healthchecks + depends_on (postgres healthy before app starts)
 
 ---
 
-## Current Focus: Path B - Interview Prep
+## Roadmap (in order)
 
-Why before more coding:
-You have MORE than enough features. The gap is explaining them clearly.
-Talking about code is a separate skill - needs practice.
-
-Format: You explain each system like I am an interviewer.
-I challenge with follow-up questions. You answer.
-
-Topics to cover (in order):
-- [x] Circuit breaker - what, why, how
-- [x] Retry with exponential backoff - what, why, how
-- [x] Rate limiting - what, why, Redis role
-- [x] Worker pool - goroutines, channels, why buffered
-- [x] JWT authentication - flow, what is inside token
-- [x] Request timeout - context, goroutine lifecycle
-- [x] Metrics system - thread safety, ResponseWriter wrapper
-- [x] Caching strategy - Redis vs in-memory, TTL, eviction
-
----
-
-## Path A - After Interview Prep
-
-### Webhook/Notification System
+### Next: Webhook / Notification System ← CURRENT
 Make worker pool do real work:
 - Send HTTP POST webhook when entry is created
-- Combine retry + worker pool + circuit breaker
-- Learn: outbound HTTP calls, error handling on external requests
+- Combine retry + worker pool + circuit breaker on real outbound HTTP
+- Learn: outbound HTTP calls, fire-and-forget, reliability on external requests
+
+### After That: Token Refresh & Revocation
+Real security gap in current JWT implementation:
+- Short-lived access tokens (15min) + refresh tokens stored in Redis
+- Revocation by deleting the refresh token from Redis
+- Teaches: auth flows, Redis as token store, security trade-offs
+
+### Then: Database Migrations
+Replace CREATE TABLE IF NOT EXISTS with proper migration tool:
+- golang-migrate library
+- Version-controlled schema changes (up/down migrations)
+- Teaches: production schema management, rollback strategies
+
+### Skip for now: Prometheus + Kubernetes
+- Prometheus: good in real job, but 80% YAML config not Go learning
+- Kubernetes: too much overhead for portfolio project, Docker already proves containerization
 
 ---
 

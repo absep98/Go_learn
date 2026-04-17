@@ -43,7 +43,9 @@ services:
       - DB_PORT=5432
       - DB_USER=user
       - DB_PASSWORD=password
-      - DB_NAME=dbname
+      - DB_NAME=analytics
+      - WEBHOOK_URL=https://webhook.site/10d08126-97d0-4087-9865-f629b03eac7f
+      - LOG_LEVEL=INFO
 
     # Don't start this service until the redis service is running.
     # Prevents the app from crashing on startup because Redis isn't ready yet.
@@ -80,7 +82,7 @@ services:
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: dbname
+      POSTGRES_DB: analytics
     ports:
       - "5432:5432"
     # Healthcheck to ensure Postgres is ready before the app tries to connect
@@ -89,7 +91,7 @@ services:
       # to check if the app is healthy. If it fails, Docker marks the container
       # as unhealthy, which can be used for auto-restart policies or just for
       # your own monitoring.
-      test: [ "CMD-SHELL", "pg_isready -U user -d dbname" ]
+      test: [ "CMD-SHELL", "pg_isready -U user -d analytics" ]
       interval: 5s
       timeout: 5s
       retries: 5

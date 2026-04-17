@@ -35,7 +35,7 @@ var webhookURL string
 
 var sender webhook.Sender // package-level, holds whatever Sender is injected
 
-//  This is for waitgroup of workers
+// This is for waitgroup of workers
 var wg sync.WaitGroup
 
 // StartWorkerPool starts N workers that listen for jobs
@@ -87,7 +87,7 @@ func processJob(job Job) {
 		slog.Debug("Processing entry creation", "payload", job.Payload)
 		err := WebhookBreaker.Execute(func() error {
 			return retry.Do(3, 500*time.Millisecond, func() error {
-				return sender.Send(webhookURL, job)
+				return sender.Send(webhookURL, job.Payload)
 			})
 		})
 
@@ -97,6 +97,15 @@ func processJob(job Job) {
 
 	case "entry_deleted":
 		slog.Debug("Processing entry deletion", "payload", job.Payload)
+		err := WebhookBreaker.Execute(func() error {
+			return retry.Do(3, 500*time.Millisecond, func() error {
+				return sender.Send(webhookURL, job.Payload)
+			})
+		})
+
+		if err != nil {
+			slog.Error(err.Error())
+		}
 		time.Sleep(1 * time.Second)
 
 	default:
