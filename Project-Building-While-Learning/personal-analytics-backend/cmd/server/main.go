@@ -141,9 +141,17 @@ func main() {
 					}
 				}))))))))
 
+	http.HandleFunc("/refresh", handlers.RequestIDMiddleware(
+		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
+			handlers.LoggingMiddleware(handlers.Refresh))))))
+
 	http.HandleFunc("/metrics", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
 			handlers.LoggingMiddleware(handlers.GetMetrics))))))
+
+	http.HandleFunc("/logout", handlers.RequestIDMiddleware(
+		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
+			handlers.LoggingMiddleware(handlers.Logout))))))
 
 	// ========================================
 	// GRACEFUL SHUTDOWN IMPLEMENTATION

@@ -2,15 +2,19 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"personal-analytics-backend/internal/db"
+	"personal-analytics-backend/internal/redis"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -36,9 +40,15 @@ type RegisterResponse struct {
 
 // LoginResponse represents the login response
 type LoginResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Token   string `json:"token"`
+	Success      bool   `json:"success"`
+	Message      string `json:"message"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+// RefreshRequest
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 // Register handles POST /register
@@ -189,7 +199,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	// "exp": Expiration time - Token becomes invalid after 24 hours
 	claims := jwt.MapClaims{
 		"user_id": userID,
-		"exp":     time.Now().Add(24 * time.Hour).Unix(), // Unix() converts time to NUMBER
+		"exp":     time.Now().Add(15 * time.Minute).Unix(), // Unix() converts time to NUMBER
 		// Why Unix()? JWT needs simple numbers, not complex Go time objects
 		// Example: time.Now().Unix() = 1736359530 (just a number)
 		// Add 24 hours = add 86400 seconds (24 * 60 * 60 = 86400)
@@ -215,12 +225,144 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generating the refresh token
+	random_UUID := uuid.New().String()
+	refresh_token_key := "refresh_token:" + random_UUID
+	refresh_token_value := fmt.Sprintf("%d", userID)
+
+	if err := redis.Client.Set(r.Context(), refresh_token_key, refresh_token_value, 7*24*time.Hour).Err(); err != nil {
+		slog.Error("Failed to store refresh token", "error", err)
+		errorResponseAuth(w, http.StatusInternalServerError, "Failed to create session")
+		return
+	}
+
 	// Success response with token
 	slog.Info("User logged in", "user_id", userID)
 	respondJSON(w, http.StatusOK, LoginResponse{
-		Success: true,
-		Message: "Login successful",
-		Token:   tokenString,
+		Success:      true,
+		Message:      "Login successful",
+		AccessToken:  tokenString,
+		RefreshToken: random_UUID,
+	})
+}
+
+// Refresh the access token
+func Refresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse JSON request body
+	var req RefreshRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		errorResponseAuth(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.RefreshToken == "" {
+		errorResponseAuth(w, http.StatusBadRequest, "Refresh token is required.")
+		return
+	}
+
+	key := "refresh_token:" + req.RefreshToken
+	val, err := redis.Client.Get(r.Context(), key).Result()
+
+	if err != nil {
+		errorResponse(w, http.StatusUnauthorized, "Invalid or expired refresh token")
+		return
+	}
+
+	userID, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Invalid session data")
+		return
+	}
+	redis.Client.Del(r.Context(), key)
+
+	// Generate JWT token
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		slog.Error("JWT_SECRET not set in environment")
+		errorResponse(w, http.StatusInternalServerError, "Server configuration error")
+		return
+	}
+
+	// data to put inside the token
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"exp":     time.Now().Add(15 * time.Minute).Unix(),
+	}
+
+	// create token object
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// signing token and covert to string
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		slog.Error("Error generating JWT token", "error", err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to generate toten")
+		return
+	}
+
+	// Generating the refresh token
+	random_UUID := uuid.New().String()
+	refresh_token_key := "refresh_token:" + random_UUID
+	refresh_token_value := fmt.Sprintf("%d", userID)
+
+	if err := redis.Client.Set(r.Context(), refresh_token_key, refresh_token_value, 7*24*time.Hour).Err(); err != nil {
+		slog.Error("Failed to store refresh token", "error", err)
+		errorResponseAuth(w, http.StatusInternalServerError, "Failed to create session")
+		return
+	}
+
+	// Success response with token and refresh token
+	respondJSON(w, http.StatusOK, LoginResponse{
+		Success:      true,
+		Message:      "Login successfully",
+		AccessToken:  tokenString,
+		RefreshToken: random_UUID,
+	})
+}
+
+// Logout
+func Logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req RefreshRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+
+	if err != nil {
+		errorResponseAuth(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.RefreshToken == "" {
+		errorResponseAuth(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	key := "refresh_token:" + req.RefreshToken
+	val, err := redis.Client.Get(r.Context(), key).Result()
+
+	if err != nil {
+		errorResponse(w, http.StatusUnauthorized, "Invalid or expired refresh token")
+		return
+	}
+
+	if val == "" {
+		errorResponse(w, http.StatusUnauthorized, "Invalid or expired refresh token")
+		return
+	}
+
+	redis.Client.Del(r.Context(), key)
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Logged out successfully",
 	})
 }
 

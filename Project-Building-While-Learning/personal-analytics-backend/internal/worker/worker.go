@@ -106,7 +106,6 @@ func processJob(job Job) {
 		if err != nil {
 			slog.Error(err.Error())
 		}
-		time.Sleep(1 * time.Second)
 
 	default:
 		slog.Warn("Unknown job type", "job_type", job.Type)
