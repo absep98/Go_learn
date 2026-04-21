@@ -47,6 +47,7 @@ WORKDIR /app
 # We DO NOT copy the .go files or the Go compiler.
 # This keeps the final image tiny and secure.
 COPY --from=builder /app/server /app/server
+COPY --from=builder /app/internal/db/migrations /app/internal/db/migrations
 
 # Documentation: Tell Docker the app uses port 8080
 EXPOSE 8080

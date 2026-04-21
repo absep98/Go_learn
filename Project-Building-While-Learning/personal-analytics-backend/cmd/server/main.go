@@ -76,7 +76,11 @@ func main() {
 	// Build Postgres connection string (DSN) from individual config fields
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName)
-	err = db.InitDB(dsn)
+
+	migrateDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
+
+	err = db.InitDB(dsn, migrateDSN)
 	if err != nil {
 		slog.Error("Failed to initialize database", "error", err)
 		os.Exit(1)

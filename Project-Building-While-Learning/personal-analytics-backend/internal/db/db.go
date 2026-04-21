@@ -18,6 +18,10 @@ import (
 	// modernc.org/sqlite raises its hand: "I do!"
 	// Connection established
 	_ "github.com/lib/pq"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
 // DB is the global database connection
@@ -29,7 +33,7 @@ import (
 var DB *sql.DB
 
 // InitDB initializes the database connection and creates tables
-func InitDB(dsn string) error {
+func InitDB(dsn string, migrateDSN string) error {
 	var err error
 
 	// Open Postgres database using the connection string (DSN)
@@ -43,51 +47,33 @@ func InitDB(dsn string) error {
 	if err != nil {
 		return err
 	}
-
-	slog.Info("Database connected", "path", dsn)
-
-	// Create tables
-	err = createTables()
+	// Run Migrations now instead of creating tables
+	err = RunMigrations(migrateDSN)
 	if err != nil {
 		return err
 	}
+	slog.Info("Database connected", "path", dsn)
 
 	return nil
 }
 
-// createTables creates all required tables if they don't exist
-func createTables() error {
-	// Users table - stores user accounts
-	usersTable := `
-	CREATE TABLE IF NOT EXISTS users (
-		id SERIAL PRIMARY KEY,
-		email TEXT UNIQUE NOT NULL,
-		password_hash TEXT NOT NULL,
-		created_at TIMESTAMP DEFAULT NOW()
-	);`
+// Run Migrations
+func RunMigrations(dsn string) error {
+	m, err := migrate.New(
+		"file://internal/db/migrations",
+		dsn,
+	)
 
-	_, err := DB.Exec(usersTable)
 	if err != nil {
-		return err
+		return fmt.Errorf("creating migrator: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("running migrations: %w", err)
 	}
 
-	// Entries table - stores mood/activity data
-	entriesTable := `
-	CREATE TABLE IF NOT EXISTS entries (
-		id SERIAL PRIMARY KEY,
-		user_id INTEGER NOT NULL,
-		text TEXT,
-		mood INTEGER,
-		category TEXT,
-		created_at TIMESTAMP DEFAULT NOW()
-	);`
-
-	_, err = DB.Exec(entriesTable)
-	if err != nil {
-		return err
-	}
-
-	slog.Info("Database tables created")
+	slog.Info("Database migrations applied")
 	return nil
 }
 
