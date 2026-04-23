@@ -77,10 +77,12 @@ func RunMigrations(dsn string) error {
 	return nil
 }
 
+type PostgresStore struct{}
+
 // InsertEntry inserts a new entry into the database
 // Puts new data INTO the database (like adding a new row to an Excel sheet)
 // Takes 5 inputs: userID (which user), text (what they wrote), mood (their mood score), tags (list of tags), category (entry type)
-func InsertEntry(ctx context.Context, userID int, text string, mood int, category string) (int64, error) {
+func (p *PostgresStore) InsertEntry(ctx context.Context, userID int, text string, mood int, category string) (int64, error) {
 	// The ? marks are placeholders (like blanks in a form)
 	query := `INSERT INTO entries (user_id, text, mood, category) VALUES ($1, $2, $3, $4) RETURNING id`
 
@@ -96,7 +98,7 @@ func InsertEntry(ctx context.Context, userID int, text string, mood int, categor
 }
 
 // GetEntryById retrieves the entry from database for a particular ID
-func GetEntryByID(ctx context.Context, entryID int, userId int64) (*models.Entry, error) {
+func (p *PostgresStore) GetEntryByID(ctx context.Context, entryID int, userId int64) (*models.Entry, error) {
 
 	query := `SELECT id, user_id, text, mood, category, created_at
 				FROM entries
@@ -125,7 +127,7 @@ func GetEntryByID(ctx context.Context, entryID int, userId int64) (*models.Entry
   "mood": 5
 }
 */
-func GetAllEntries(ctx context.Context) ([]models.Entry, error) {
+func (p *PostgresStore) GetAllEntries(ctx context.Context) ([]models.Entry, error) {
 	query := `SELECT id, user_id, text, mood, category, created_at FROM entries ORDER BY created_at DESC`
 
 	rows, err := DB.QueryContext(ctx, query)
@@ -153,7 +155,7 @@ func GetAllEntries(ctx context.Context) ([]models.Entry, error) {
 
 // GetEntriesByUser retrieves all entries for a specific user
 // Used when user is authenticated - only show their own entries
-func GetEntriesByUser(ctx context.Context, userID int64) ([]models.Entry, error) {
+func (p *PostgresStore) GetEntriesByUser(ctx context.Context, userID int64) ([]models.Entry, error) {
 	query := `SELECT id, user_id, text, mood, category, created_at
 	          FROM entries
 	          WHERE user_id = $1
@@ -182,7 +184,7 @@ func GetEntriesByUser(ctx context.Context, userID int64) ([]models.Entry, error)
 	return entries, nil
 }
 
-func GetAllEntriesPaginated(ctx context.Context, userID int64, limit int, offset int) ([]models.Entry, error) {
+func (p *PostgresStore) GetAllEntriesPaginated(ctx context.Context, userID int64, limit int, offset int) ([]models.Entry, error) {
 
 	if limit < 1 {
 		limit = 10
@@ -219,7 +221,7 @@ func GetAllEntriesPaginated(ctx context.Context, userID int64, limit int, offset
 	return entries, nil
 }
 
-func GetEntryCount(ctx context.Context, userID int64) (int, error) {
+func (p *PostgresStore) GetEntryCount(ctx context.Context, userID int64) (int, error) {
 
 	query := `SELECT COUNT(*) FROM entries WHERE user_id = $1`
 
@@ -232,7 +234,7 @@ func GetEntryCount(ctx context.Context, userID int64) (int, error) {
 	return count, nil
 }
 
-func GetEntriesFiltered(ctx context.Context, userID int64, category string, moodMin int, limit int, offset int) ([]models.Entry, error) {
+func (p *PostgresStore) GetEntriesFiltered(ctx context.Context, userID int64, category string, moodMin int, limit int, offset int) ([]models.Entry, error) {
 
 	query := `SELECT id, user_id, text, mood, category, created_at FROM entries WHERE user_id = $1`
 	args := []interface{}{userID}
@@ -283,7 +285,7 @@ func GetEntriesFiltered(ctx context.Context, userID int64, category string, mood
 
 // CreateUser inserts a new user into the database
 // Takes email and hashed password (NOT plain password!)
-func CreateUser(ctx context.Context, email string, passwordHash string) (int64, error) {
+func (p *PostgresStore) CreateUser(ctx context.Context, email string, passwordHash string) (int64, error) {
 	query := `INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id`
 
 	var id int64
@@ -299,7 +301,7 @@ func CreateUser(ctx context.Context, email string, passwordHash string) (int64, 
 
 // GetUserByEmail retrieves a user by their email
 // Returns user_id and password_hash for login verification
-func GetUserByEmail(ctx context.Context, email string) (int64, string, error) {
+func (p *PostgresStore) GetUserByEmail(ctx context.Context, email string) (int64, string, error) {
 	query := `SELECT id, password_hash FROM users WHERE email = $1`
 
 	var userID int64
@@ -315,7 +317,7 @@ func GetUserByEmail(ctx context.Context, email string) (int64, string, error) {
 
 // Update Entry
 // Updates an entry only if it belongs to the authenticated user
-func UpdateEntry(ctx context.Context, entryId int, userID int64, text string, mood int, category string) (int64, error) {
+func (p *PostgresStore) UpdateEntry(ctx context.Context, entryId int, userID int64, text string, mood int, category string) (int64, error) {
 
 	query := `UPDATE entries SET text = $1, mood = $2, category = $3 WHERE id = $4 AND user_id = $5`
 
@@ -336,7 +338,7 @@ func UpdateEntry(ctx context.Context, entryId int, userID int64, text string, mo
 	return rowsAffected, nil
 }
 
-func DeleteEntry(ctx context.Context, entryId int, userID int64) (int64, error) {
+func (p *PostgresStore) DeleteEntry(ctx context.Context, entryId int, userID int64) (int64, error) {
 
 	query := `DELETE FROM entries WHERE id = $1 and user_id = $2`
 

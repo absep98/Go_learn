@@ -4,5 +4,3 @@ run:
 issues:
   exclude-dirs:
     - learning-demos
-
-

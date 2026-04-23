@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"personal-analytics-backend/internal/cache"
-	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/models"
 	"personal-analytics-backend/internal/worker"
 	"strconv"
@@ -48,7 +47,7 @@ func errorResponse(w http.ResponseWriter, status int, message string) {
 }
 
 // CreateEntry handles POST /entries
-func CreateEntry(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	logger := GetLoggerWithRequestID(r)
 	logger.Info("Request received", "method", "POST", "path", "/entries")
 
@@ -108,7 +107,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert into database
-	id, err := db.InsertEntry(r.Context(), int(userID), req.Text, req.Mood, req.Category)
+	id, err := h.Store.InsertEntry(r.Context(), int(userID), req.Text, req.Mood, req.Category)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to save entry")
 		return
@@ -143,7 +142,7 @@ func CreateEntry(w http.ResponseWriter, r *http.Request) {
 // GetEntries handles GET /entries
 // Returns entries for the authenticated user only
 // Supports pagination: ?page=1&limit=10
-func GetEntries(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Request received", "method", "GET", "path", "/entries")
 
 	// Only allow GET method
@@ -225,9 +224,9 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if category != "" || moodMin > 0 {
-		entries, err = db.GetEntriesFiltered(r.Context(), userID, category, moodMin, limit, offset)
+		entries, err = h.Store.GetEntriesFiltered(r.Context(), userID, category, moodMin, limit, offset)
 	} else {
-		entries, err = db.GetAllEntriesPaginated(r.Context(), userID, limit, offset)
+		entries, err = h.Store.GetAllEntriesPaginated(r.Context(), userID, limit, offset)
 	}
 
 	if err != nil {
@@ -243,7 +242,7 @@ func GetEntries(w http.ResponseWriter, r *http.Request) {
 		entries = []models.Entry{}
 	}
 
-	total, err := db.GetEntryCount(r.Context(), userID)
+	total, err := h.Store.GetEntryCount(r.Context(), userID)
 
 	if err != nil {
 		slog.Error("failed to get entry count", "error", err)
@@ -290,7 +289,7 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
-func UpdateEntry(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPatch {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -340,7 +339,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call database to update entry
-	rowsAffected, err := db.UpdateEntry(r.Context(), entryId, userID, req.Text, req.Mood, req.Category)
+	rowsAffected, err := h.Store.UpdateEntry(r.Context(), entryId, userID, req.Text, req.Mood, req.Category)
 	if err != nil {
 		slog.Error("Database error on update", "error", err, "entry_id", entryId)
 		errorResponse(w, http.StatusInternalServerError, "Failed to update entry")
@@ -364,7 +363,7 @@ func UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func DeleteEntry(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -392,7 +391,7 @@ func DeleteEntry(w http.ResponseWriter, r *http.Request) {
 
 	slog.Debug("Deleting entry", "entry_id", entryId, "user_id", userID)
 
-	rowsAffected, err := db.DeleteEntry(r.Context(), entryId, userID)
+	rowsAffected, err := h.Store.DeleteEntry(r.Context(), entryId, userID)
 
 	if err != nil {
 		slog.Error("Database error on delete", "error", err, "entry_id", entryId)

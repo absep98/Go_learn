@@ -10,9 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"personal-analytics-backend/internal/db"
-	"personal-analytics-backend/internal/redis"
-
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -52,7 +49,7 @@ type RefreshRequest struct {
 }
 
 // Register handles POST /register
-func Register(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Request received", "method", "POST", "path", "/register")
 
 	// Only allow POST method
@@ -112,7 +109,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save user to database
-	userID, err := db.CreateUser(r.Context(), req.Email, string(passwordHash))
+	userID, err := h.Store.CreateUser(r.Context(), req.Email, string(passwordHash))
 	if err != nil {
 		// Check if email already exists (SQLite UNIQUE constraint violation)
 		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
@@ -134,7 +131,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 }
 
 // Login handles POST /login
-func Login(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Request received", "method", "POST", "path", "/login")
 
 	// Only allow POST method
@@ -163,7 +160,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get user from database
-	userID, passwordHash, err := db.GetUserByEmail(r.Context(), req.Email)
+	userID, passwordHash, err := h.Store.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
 		// Don't reveal if user exists or not (security best practice)
 		slog.Warn("Login attempt for non-existent user", "email", req.Email)
@@ -230,7 +227,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	refresh_token_key := "refresh_token:" + random_UUID
 	refresh_token_value := fmt.Sprintf("%d", userID)
 
-	if err := redis.Client.Set(r.Context(), refresh_token_key, refresh_token_value, 7*24*time.Hour).Err(); err != nil {
+	if err := h.Cache.Set(r.Context(), refresh_token_key, refresh_token_value, 7*24*time.Hour); err != nil {
 		slog.Error("Failed to store refresh token", "error", err)
 		errorResponseAuth(w, http.StatusInternalServerError, "Failed to create session")
 		return
@@ -247,7 +244,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // Refresh the access token
-func Refresh(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -267,7 +264,7 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := "refresh_token:" + req.RefreshToken
-	val, err := redis.Client.Get(r.Context(), key).Result()
+	val, err := h.Cache.Get(r.Context(), key)
 
 	if err != nil {
 		errorResponse(w, http.StatusUnauthorized, "Invalid or expired refresh token")
@@ -279,7 +276,7 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Invalid session data")
 		return
 	}
-	redis.Client.Del(r.Context(), key)
+	h.Cache.Del(r.Context(), key)
 
 	// Generate JWT token
 	secret := os.Getenv("JWT_SECRET")
@@ -311,7 +308,7 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 	refresh_token_key := "refresh_token:" + random_UUID
 	refresh_token_value := fmt.Sprintf("%d", userID)
 
-	if err := redis.Client.Set(r.Context(), refresh_token_key, refresh_token_value, 7*24*time.Hour).Err(); err != nil {
+	if err := h.Cache.Set(r.Context(), refresh_token_key, refresh_token_value, 7*24*time.Hour); err != nil {
 		slog.Error("Failed to store refresh token", "error", err)
 		errorResponseAuth(w, http.StatusInternalServerError, "Failed to create session")
 		return
@@ -327,7 +324,7 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 // Logout
-func Logout(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -347,7 +344,7 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := "refresh_token:" + req.RefreshToken
-	val, err := redis.Client.Get(r.Context(), key).Result()
+	val, err := h.Cache.Get(r.Context(), key)
 
 	if err != nil {
 		errorResponse(w, http.StatusUnauthorized, "Invalid or expired refresh token")
@@ -359,7 +356,7 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redis.Client.Del(r.Context(), key)
+	h.Cache.Del(r.Context(), key)
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "Logged out successfully",

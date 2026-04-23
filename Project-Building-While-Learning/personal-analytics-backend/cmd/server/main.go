@@ -93,6 +93,12 @@ func main() {
 	}
 	defer redis.CloseRedis()
 
+	h := &handlers.Handler{
+		Store:     &db.PostgresStore{},
+		Cache:     redis.NewRedisCache(),
+		JWTSecret: cfg.JWTSecret,
+	}
+
 	// Start background worker pool (3 workers)
 	worker.StartWorkerPool(cfg.WorkerPoolSize, cfg.WebhookURL, webhook.HTTPSender{})
 
@@ -122,8 +128,8 @@ func main() {
 	http.HandleFunc("/ping", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.PingHandler))))))
 
 	// Auth endpoints (no protection needed)
-	http.HandleFunc("/register", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Register))))))
-	http.HandleFunc("/login", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(handlers.Login))))))
+	http.HandleFunc("/register", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(h.Register))))))
+	http.HandleFunc("/login", handlers.RequestIDMiddleware(handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(h.Login))))))
 
 	// Entries endpoints (PROTECTED - requires authentication)
 	http.HandleFunc("/entries", handlers.RequestIDMiddleware(
@@ -131,15 +137,15 @@ func main() {
 			handlers.AuthMiddleware(
 				handlers.UserRateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodPost {
-						handlers.CreateEntry(w, r)
+						h.CreateEntry(w, r)
 					} else if r.Method == http.MethodGet {
-						handlers.GetEntries(w, r)
+						h.GetEntries(w, r)
 					} else if r.Method == http.MethodPatch {
 						// PATCH /entries?id=5 - Update an entry
-						handlers.UpdateEntry(w, r)
+						h.UpdateEntry(w, r)
 					} else if r.Method == http.MethodDelete {
 						// Delete /entries?id=5 - Delete an entry
-						handlers.DeleteEntry(w, r)
+						h.DeleteEntry(w, r)
 					} else {
 						http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 					}
@@ -147,7 +153,7 @@ func main() {
 
 	http.HandleFunc("/refresh", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
-			handlers.LoggingMiddleware(handlers.Refresh))))))
+			handlers.LoggingMiddleware(h.Refresh))))))
 
 	http.HandleFunc("/metrics", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
@@ -155,7 +161,7 @@ func main() {
 
 	http.HandleFunc("/logout", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
-			handlers.LoggingMiddleware(handlers.Logout))))))
+			handlers.LoggingMiddleware(h.Logout))))))
 
 	// ========================================
 	// GRACEFUL SHUTDOWN IMPLEMENTATION
