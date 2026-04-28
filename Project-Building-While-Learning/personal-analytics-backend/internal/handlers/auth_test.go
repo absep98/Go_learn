@@ -11,12 +11,14 @@ import (
 
 func TestValidRegisteration(t *testing.T) {
 
+	h := &Handler{Store: &FakeStore{}, Cache: &FakeCache{}, JWTSecret: "test-secret"}
+
 	body := strings.NewReader(`{"email":"aks@gmail.com","password":"Juniper@20202"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/register", body)
 	rec := httptest.NewRecorder()
 
-	Register(rec, req)
+	h.Register(rec, req)
 
 	var resp RegisterResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
@@ -35,12 +37,14 @@ func TestValidRegisteration(t *testing.T) {
 
 func TestRegisteration_EmailMissing(t *testing.T) {
 
+	h := &Handler{Store: &FakeStore{}, Cache: &FakeCache{}, JWTSecret: "test-secret"}
+
 	body := strings.NewReader(`{"email":"","password":"Juniper@20202"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/register", body)
 	rec := httptest.NewRecorder()
 
-	Register(rec, req)
+	h.Register(rec, req)
 
 	var resp RegisterResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
@@ -59,12 +63,14 @@ func TestRegisteration_EmailMissing(t *testing.T) {
 
 func TestRegisteration_ShortPassword(t *testing.T) {
 
+	h := &Handler{Store: &FakeStore{}, Cache: &FakeCache{}, JWTSecret: "test-secret"}
+
 	body := strings.NewReader(`{"email":"test@gmail.com","password":"Junip"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/register", body)
 	rec := httptest.NewRecorder()
 
-	Register(rec, req)
+	h.Register(rec, req)
 
 	var resp RegisterResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
@@ -83,21 +89,25 @@ func TestRegisteration_ShortPassword(t *testing.T) {
 
 func TestValidRegisterationDuplicate(t *testing.T) {
 
+	h := &Handler{Store: &FakeStore{}, Cache: &FakeCache{}, JWTSecret: "test-secret"}
+
+	// first registeration - should succeed
 	body := strings.NewReader(`{"email":"aks@gmail.com","password":"Juniper@20202"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/register", body)
 	rec := httptest.NewRecorder()
 
-	Register(rec, req)
+	h.Register(rec, req)
 
-	var resp RegisterResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Setup failed: first register got %d", rec.Code)
 	}
 
-	if resp.Success {
-		t.Errorf("expected succes false for duplicate email")
-	}
+	// second registeration - same email, should fail
+	body = strings.NewReader(`{"email":"aks@gmail.com","password":"Juniper@2020"}`)
+	req = httptest.NewRequest(http.MethodPost, "/register", body)
+	rec = httptest.NewRecorder()
+	h.Register(rec, req)
 
 	if rec.Code != http.StatusConflict {
 		t.Errorf("expected 409, got %d", rec.Code)
@@ -107,12 +117,14 @@ func TestValidRegisterationDuplicate(t *testing.T) {
 
 func TestValidLogin(t *testing.T) {
 
+	h := &Handler{Store: &FakeStore{}, Cache: &FakeCache{}, JWTSecret: "test-secret"}
+
 	body := strings.NewReader(`{"email":"aks1@gmail.com","password":"Dynasty@Jan2020"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/register", body)
 	rec := httptest.NewRecorder()
 
-	Register(rec, req)
+	h.Register(rec, req)
 
 	var resp RegisterResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
@@ -134,7 +146,7 @@ func TestValidLogin(t *testing.T) {
 
 	os.Setenv("JWT_SECRET", "test-secret")
 
-	Login(rec, req)
+	h.Login(rec, req)
 
 	var loginResp LoginResponse
 	if err := json.NewDecoder(rec.Body).Decode(&loginResp); err != nil {
@@ -145,7 +157,7 @@ func TestValidLogin(t *testing.T) {
 		t.Errorf("expected success true, got false")
 	}
 
-	if loginResp.Token == "" {
+	if loginResp.AccessToken == "" {
 		t.Errorf("expected token didn't get")
 	}
 
@@ -153,10 +165,12 @@ func TestValidLogin(t *testing.T) {
 
 func TestLogin_WrongPassword(t *testing.T) {
 	// Register a fresh user for this test (unique email to avoid conflict)
+	h := &Handler{Store: &FakeStore{}, Cache: &FakeCache{}, JWTSecret: "test-secret"}
+
 	body := strings.NewReader(`{"email":"wrongpass@gmail.com","password":"Dynasty@Jan2020"}`)
 	req := httptest.NewRequest(http.MethodPost, "/register", body)
 	rec := httptest.NewRecorder()
-	Register(rec, req)
+	h.Register(rec, req)
 
 	var resp RegisterResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
@@ -171,7 +185,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/login", body)
 	rec = httptest.NewRecorder()
 	os.Setenv("JWT_SECRET", "test-secret")
-	Login(rec, req)
+	h.Login(rec, req)
 
 	var loginResp LoginResponse
 	if err := json.NewDecoder(rec.Body).Decode(&loginResp); err != nil {
@@ -181,7 +195,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	if loginResp.Success {
 		t.Errorf("expected success false for wrong password")
 	}
-	if loginResp.Token != "" {
+	if loginResp.AccessToken != "" {
 		t.Errorf("expected empty token, got one")
 	}
 	if rec.Code != http.StatusUnauthorized {
@@ -191,11 +205,13 @@ func TestLogin_WrongPassword(t *testing.T) {
 
 func TestLogin_NonExistentEmail(t *testing.T) {
 	// No registration — email never exists in DB
+	h := &Handler{Store: &FakeStore{}, Cache: &FakeCache{}, JWTSecret: "test-secret"}
+
 	body := strings.NewReader(`{"email":"ghost_user@gmail.com","password":"somepassword"}`)
 	req := httptest.NewRequest(http.MethodPost, "/login", body)
 	rec := httptest.NewRecorder()
 	os.Setenv("JWT_SECRET", "test-secret")
-	Login(rec, req)
+	h.Login(rec, req)
 
 	var loginResp LoginResponse
 	if err := json.NewDecoder(rec.Body).Decode(&loginResp); err != nil {
@@ -205,7 +221,7 @@ func TestLogin_NonExistentEmail(t *testing.T) {
 	if loginResp.Success {
 		t.Errorf("expected success false for non-existent email")
 	}
-	if loginResp.Token != "" {
+	if loginResp.AccessToken != "" {
 		t.Errorf("expected empty token, got one")
 	}
 	if rec.Code != http.StatusUnauthorized {

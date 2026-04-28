@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Post a markdown article to all platforms (dev.to, Hashnode, Substack) in one command.
+    Post a markdown article to all platforms (dev.to, Hashnode, Substack, Reddit, Bluesky) in one command.
 
 .PARAMETER File
     Path to markdown file with YAML frontmatter (title, tags, etc.)
@@ -43,9 +43,10 @@ Write-Host ""
 $results = @()
 
 # ── dev.to ────────────────────────────────────────────────────
-Write-Host "[1/3] dev.to..." -ForegroundColor Yellow -NoNewline
+Write-Host "[1/6] dev.to..." -ForegroundColor Yellow -NoNewline
 $devtoDir = Join-Path $scriptRoot "post-to-devto"
 $devtoEnv = Join-Path $devtoDir ".env"
+$devtoArticleURL = ""
 
 if (Test-Path $devtoEnv) {
     try {
@@ -55,7 +56,11 @@ if (Test-Path $devtoEnv) {
 
         if ($LASTEXITCODE -eq 0) {
             Write-Host " OK" -ForegroundColor Green
-            $results += [PSCustomObject]@{ Platform = "dev.to"; Status = "Success"; Detail = ($output -split "`n" | Where-Object { $_ -match "URL|ID|Draft" } | Select-Object -First 1).Trim() }
+            $detail = ($output -split "`n" | Where-Object { $_ -match "URL|ID|Draft" } | Select-Object -First 1).Trim()
+            $results += [PSCustomObject]@{ Platform = "dev.to"; Status = "Success"; Detail = $detail }
+            # Extract the dev.to URL to pass to Bluesky as a link card
+            $urlLine = ($output -split "`n" | Where-Object { $_ -match "^URL: https://dev\.to" } | Select-Object -First 1)
+            if ($urlLine) { $devtoArticleURL = ($urlLine -replace "^URL: ", "").Trim() }
         }
         else {
             Write-Host " FAILED" -ForegroundColor Red
@@ -74,7 +79,7 @@ else {
 }
 
 # ── Hashnode ──────────────────────────────────────────────────
-Write-Host "[2/3] Hashnode..." -ForegroundColor Yellow -NoNewline
+Write-Host "[2/6] Hashnode..." -ForegroundColor Yellow -NoNewline
 $hashnodeDir = Join-Path $scriptRoot "post-to-hashnode"
 $hashnodeEnv = Join-Path $hashnodeDir ".env"
 
@@ -105,7 +110,7 @@ else {
 }
 
 # ── Substack ─────────────────────────────────────────────────
-Write-Host "[3/3] Substack..." -ForegroundColor Yellow -NoNewline
+Write-Host "[3/6] Substack..." -ForegroundColor Yellow -NoNewline
 $substackDir = Join-Path $scriptRoot "post-to-substack"
 $substackEnv = Join-Path $substackDir ".env"
 
@@ -135,7 +140,150 @@ else {
     $results += [PSCustomObject]@{ Platform = "Substack"; Status = "Skipped"; Detail = "No .env configured" }
 }
 
+# ── Reddit ────────────────────────────────────────────────────
+Write-Host "[4/6] Reddit..." -ForegroundColor Yellow -NoNewline
+$redditDir = Join-Path $scriptRoot "post-to-reddit"
+$redditEnv = Join-Path $redditDir ".env"
+
+if (Test-Path $redditEnv) {
+    try {
+        Push-Location $redditDir
+        $output = & go run main.go $Mode $File 2>&1 | Out-String
+        Pop-Location
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host " OK" -ForegroundColor Green
+            $results += [PSCustomObject]@{ Platform = "Reddit"; Status = "Success"; Detail = ($output -split "`n" | Where-Object { $_ -match "URL|ID|Draft|dry-run" } | Select-Object -First 1).Trim() }
+        }
+        else {
+            Write-Host " FAILED" -ForegroundColor Red
+            $results += [PSCustomObject]@{ Platform = "Reddit"; Status = "Failed"; Detail = ($output -split "`n" | Select-Object -Last 2 | Select-Object -First 1).Trim() }
+        }
+    }
+    catch {
+        Pop-Location -ErrorAction SilentlyContinue
+        Write-Host " ERROR" -ForegroundColor Red
+        $results += [PSCustomObject]@{ Platform = "Reddit"; Status = "Error"; Detail = $_.Exception.Message }
+    }
+}
+else {
+    Write-Host " SKIPPED (no .env)" -ForegroundColor DarkGray
+    $results += [PSCustomObject]@{ Platform = "Reddit"; Status = "Skipped"; Detail = "No .env configured" }
+}
+
+# ── Bluesky ───────────────────────────────────────────────────
+Write-Host "[5/6] Bluesky..." -ForegroundColor Yellow -NoNewline
+$blueskyDir = Join-Path $scriptRoot "post-to-bluesky"
+$blueskyEnv = Join-Path $blueskyDir ".env"
+
+if (Test-Path $blueskyEnv) {
+    try {
+        # Auto-inject dev.to URL captured earlier as the link card URL
+        if ($devtoArticleURL -ne "") { $env:BSKY_DEVTO_URL = $devtoArticleURL }
+        Push-Location $blueskyDir
+        $output = & go run main.go $Mode $File 2>&1 | Out-String
+        Pop-Location
+        $env:BSKY_DEVTO_URL = ""  # Reset after use
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host " OK" -ForegroundColor Green
+            $results += [PSCustomObject]@{ Platform = "Bluesky"; Status = "Success"; Detail = ($output -split "`n" | Where-Object { $_ -match "URL|ID|Draft|dry-run" } | Select-Object -First 1).Trim() }
+        }
+        else {
+            Write-Host " FAILED" -ForegroundColor Red
+            $results += [PSCustomObject]@{ Platform = "Bluesky"; Status = "Failed"; Detail = ($output -split "`n" | Select-Object -Last 2 | Select-Object -First 1).Trim() }
+        }
+    }
+    catch {
+        Pop-Location -ErrorAction SilentlyContinue
+        Write-Host " ERROR" -ForegroundColor Red
+        $results += [PSCustomObject]@{ Platform = "Bluesky"; Status = "Error"; Detail = $_.Exception.Message }
+    }
+}
+else {
+    Write-Host " SKIPPED (no .env)" -ForegroundColor DarkGray
+    $results += [PSCustomObject]@{ Platform = "Bluesky"; Status = "Skipped"; Detail = "No .env configured" }
+}
+# ── LinkedIn ──────────────────────────────────────────────────
+Write-Host "[6/6] LinkedIn..." -ForegroundColor Yellow -NoNewline
+$linkedinDir = Join-Path $scriptRoot "post-to-linkedin"
+$linkedinEnv = Join-Path $linkedinDir ".env"
+
+if (Test-Path $linkedinEnv) {
+    # Check if access token is configured
+    $hasToken = (Get-Content $linkedinEnv | Where-Object { $_ -match '^LINKEDIN_ACCESS_TOKEN=.+' -and $_ -notmatch 'your-' })
+    if ($hasToken) {
+        try {
+            # Auto-inject dev.to URL for link card
+            if ($devtoArticleURL -ne "") { $env:LINKEDIN_DEVTO_URL = $devtoArticleURL }
+            Push-Location $linkedinDir
+            $output = & go run main.go $Mode $File 2>&1 | Out-String
+            Pop-Location
+            $env:LINKEDIN_DEVTO_URL = ""  # Reset after use
+
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host " OK" -ForegroundColor Green
+                $results += [PSCustomObject]@{ Platform = "LinkedIn"; Status = "Success"; Detail = ($output -split "`n" | Where-Object { $_ -match "URL|ID|Draft|Posted" } | Select-Object -First 1).Trim() }
+            }
+            else {
+                Write-Host " FAILED" -ForegroundColor Red
+                $results += [PSCustomObject]@{ Platform = "LinkedIn"; Status = "Failed"; Detail = ($output -split "`n" | Select-Object -Last 2 | Select-Object -First 1).Trim() }
+            }
+        }
+        catch {
+            Pop-Location -ErrorAction SilentlyContinue
+            Write-Host " ERROR" -ForegroundColor Red
+            $results += [PSCustomObject]@{ Platform = "LinkedIn"; Status = "Error"; Detail = $_.Exception.Message }
+        }
+    }
+    else {
+        Write-Host " SKIPPED (run 'go run main.go login' first)" -ForegroundColor DarkGray
+        $results += [PSCustomObject]@{ Platform = "LinkedIn"; Status = "Skipped"; Detail = "No access token. Run login first." }
+    }
+}
+else {
+    Write-Host " SKIPPED (no .env)" -ForegroundColor DarkGray
+    $results += [PSCustomObject]@{ Platform = "LinkedIn"; Status = "Skipped"; Detail = "No .env configured" }
+}
 # ── Summary ───────────────────────────────────────────────────
 Write-Host ""
 Write-Host "=== Results ===" -ForegroundColor Cyan
 $results | Format-Table -AutoSize
+
+# ── AksExplorer (manual) ──────────────────────────────────────
+# Parse title from frontmatter for the manual post text
+$fileContent = Get-Content $File -Raw
+$postTitle = ""
+if ($fileContent -match '(?m)^title:\s*(.+)$') { $postTitle = $Matches[1].Trim() }
+$articleURL = if ($devtoArticleURL -ne "") { $devtoArticleURL } else { "https://dev.to" }
+
+$aksExplorerText = @"
+New post: $postTitle
+
+$(if ($postTitle -match "Part (\d+)|#(\d+)") { "Part of the 'Learning Go in Public' series." } else { "From the 'Learning Go in Public' series." })
+
+Full article: $articleURL
+
+#golang #buildinpublic #backend #learning
+"@
+
+Write-Host ""
+Write-Host "=== AksExplorer (manual paste) ===" -ForegroundColor Magenta
+Write-Host "Go to: https://www.linkedin.com/company/aksexplorer/posts/" -ForegroundColor DarkGray
+Write-Host "Click 'Start a post' and paste:" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host $aksExplorerText -ForegroundColor White
+Write-Host ""
+Write-Host "--- (copied to clipboard) ---" -ForegroundColor DarkGray
+$aksExplorerText | Set-Clipboard
+
+# ── Medium (manual import) ────────────────────────────────────
+Write-Host ""
+Write-Host "=== Medium (manual import - earns money!) ===" -ForegroundColor Green
+Write-Host "1. Go to: https://medium.com/p/import" -ForegroundColor DarkGray
+Write-Host "2. Paste this URL to import:" -ForegroundColor DarkGray
+Write-Host "   $articleURL" -ForegroundColor White
+Write-Host "3. Add topics: Go, Backend Development, Programming, Learning To Code, Build In Public" -ForegroundColor DarkGray
+Write-Host "4. Check 'Paywall this story' and Publish" -ForegroundColor DarkGray
+Write-Host "5. After publishing: ... > Story settings > Canonical link > paste the dev.to URL" -ForegroundColor DarkGray
+Write-Host "6. Copy the FRIEND LINK: ... > Copy friend link, use it for social posts instead of dev.to" -ForegroundColor Yellow

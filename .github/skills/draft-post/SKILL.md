@@ -17,12 +17,21 @@ Generates ready-to-copy social/blog posts based on what has actually been built 
 
 ## Procedure
 
-### Step 1 — Gather Context
-Run the following to understand recent work:
+### Step 0 — Check for Auto-Captured Commit Context
+**Always do this first.** A git post-commit hook automatically saves the latest commit info to:
+```
+.github/skills/draft-post/scripts/.last-commit-context.json
+```
+Read this file. It contains `hash`, `message`, `files_changed`, `stat`, and `date` for the most recent commit. Use this as the primary input for the post — the user just committed something and wants to write about it.
+
+If the file doesn't exist or the user specifies a different topic, fall back to Step 1.
+
+### Step 1 — Gather Additional Context
+Read the changed files from the commit context to understand what was actually built:
 ```powershell
 cd "c:\learning\Go_learn"
-git log --oneline -20
-git diff HEAD~5 HEAD --stat
+git show <hash> --stat
+git diff <hash>~1 <hash>
 ```
 
 Then read relevant source files based on the topic. Key areas:

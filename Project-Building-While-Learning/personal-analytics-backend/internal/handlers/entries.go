@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"personal-analytics-backend/internal/cache"
 	"personal-analytics-backend/internal/models"
 	"personal-analytics-backend/internal/worker"
 	"strconv"
@@ -114,8 +113,8 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// reason to delete as if existing data is there its now stale as we created newly this is called the cache invalidaton.
-	cache.Delete(fmt.Sprintf("count:user:%d", userID))
-	cache.Delete(fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
+	h.Cache.Del(r.Context(), fmt.Sprintf("count:user:%d", userID))
+	h.Cache.Del(r.Context(), fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
 
 	// Add background job to process this entry (async)
 	// This returns immediately - worker processes it in background
@@ -209,10 +208,10 @@ func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	if category == "" && moodMin == 0 {
 		// Get from cache - two return values
-		cached, found := cache.Get(cacheKey)
+		cached, err := h.Cache.Get(r.Context(), cacheKey)
 
 		// if found - write raw JSON to response, return
-		if found {
+		if err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, cached)
@@ -267,7 +266,7 @@ func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	if category == "" && moodMin == 0 {
 		if data, err := json.Marshal(responseData); err == nil {
-			cache.Set(cacheKey, string(data), 60*time.Second)
+			h.Cache.Set(r.Context(), cacheKey, string(data), 60*time.Second)
 		}
 	}
 
@@ -352,8 +351,8 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cache.Delete(fmt.Sprintf("count:user:%d", userID))
-	cache.Delete(fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
+	h.Cache.Del(r.Context(), fmt.Sprintf("count:user:%d", userID))
+	h.Cache.Del(r.Context(), fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
 
 	// Success response
 	slog.Info("Entry updated", "entry_id", entryId, "user_id", userID)
@@ -404,8 +403,8 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cache.Delete(fmt.Sprintf("count:user:%d", userID))
-	cache.Delete(fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
+	h.Cache.Del(r.Context(), fmt.Sprintf("count:user:%d", userID))
+	h.Cache.Del(r.Context(), fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
 
 	worker.AddJob("entry_deleted", map[string]interface{}{
 		"event":     "entry_deleted",

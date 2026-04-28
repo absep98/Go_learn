@@ -51,6 +51,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Auto-generated commit context (for draft-post skill)
+.last-commit-context.json
+
 # Database files (if using SQLite locally)
 *.db
 *.sqlite
