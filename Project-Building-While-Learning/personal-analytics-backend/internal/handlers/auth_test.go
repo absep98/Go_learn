@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 )
@@ -144,8 +143,6 @@ func TestValidLogin(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/login", body)
 	rec = httptest.NewRecorder()
 
-	os.Setenv("JWT_SECRET", "test-secret")
-
 	h.Login(rec, req)
 
 	var loginResp LoginResponse
@@ -184,7 +181,6 @@ func TestLogin_WrongPassword(t *testing.T) {
 	body = strings.NewReader(`{"email":"wrongpass@gmail.com","password":"WrongPassword"}`)
 	req = httptest.NewRequest(http.MethodPost, "/login", body)
 	rec = httptest.NewRecorder()
-	os.Setenv("JWT_SECRET", "test-secret")
 	h.Login(rec, req)
 
 	var loginResp LoginResponse
@@ -210,7 +206,6 @@ func TestLogin_NonExistentEmail(t *testing.T) {
 	body := strings.NewReader(`{"email":"ghost_user@gmail.com","password":"somepassword"}`)
 	req := httptest.NewRequest(http.MethodPost, "/login", body)
 	rec := httptest.NewRecorder()
-	os.Setenv("JWT_SECRET", "test-secret")
 	h.Login(rec, req)
 
 	var loginResp LoginResponse

@@ -172,11 +172,6 @@ func TestCreateEntry_InvalidMood(t *testing.T) {
 
 func TestGetEntries(t *testing.T) {
 
-	t.Helper()
-	if os.Getenv("DB_HOST") == "" {
-		t.Skip("skipping DB test: DB_HOST not set")
-	}
-
 	h := &Handler{
 		Store:     &db.PostgresStore{},
 		Cache:     &FakeCache{},

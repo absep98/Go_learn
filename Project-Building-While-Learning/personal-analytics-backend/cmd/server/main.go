@@ -135,7 +135,7 @@ func main() {
 	// Entries endpoints (PROTECTED - requires authentication)
 	http.HandleFunc("/entries", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
-			handlers.AuthMiddleware(
+			h.AuthMiddleware(
 				handlers.UserRateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodPost {
 						h.CreateEntry(w, r)

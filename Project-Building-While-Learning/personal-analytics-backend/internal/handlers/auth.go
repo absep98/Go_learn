@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -130,6 +129,40 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Add token helper method
+func (h *Handler) generateAccessToken(userID int64) (string, error) {
+	if h.JWTSecret == "" {
+		return "", fmt.Errorf("JWT secret is not configured")
+	}
+
+	// STEP 1: Create claims (data to put inside token)
+	// jwt.MapClaims: Just a map[string]interface{} - you already know this!
+	// "user_id": userID - So we know WHO this token belongs to
+	// "exp": Expiration time - Token becomes invalid after 24 hours
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"exp":     time.Now().Add(15 * time.Minute).Unix(), // Unix() converts time to NUMBER
+		// Why Unix()? JWT needs simple numbers, not complex Go time objects
+		// Example: time.Now().Unix() = 1736359530 (just a number)
+		// Add 24 hours = add 86400 seconds (24 * 60 * 60 = 86400)
+	}
+
+	// STEP 2: Create token object (NOT a string yet, just a Go object)
+	// jwt.SigningMethodHS256: Encryption method (standard, secure, don't worry about it)
+	// claims: The data map we just created above
+	// Think: Creating an unsigned document with your data inside
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// STEP 3: Sign token and convert to string (this makes it official!)
+	// This is like putting a wax seal on a letter - proves it's authentic
+	// []byte(secret): Your secret key (converts string to bytes - library requirement)
+	// Returns: "eyJhbGci...xyz" (the actual JWT string user receives)
+	// Format: header.payload.signature (3 parts separated by dots)
+	// "The secret key is a string, but encryption libraries need bytes (raw data format), so we convert it with []byte(secret). This lets the library encrypt and sign the token."
+
+	return token.SignedString([]byte(h.JWTSecret))
+}
+
 // Login handles POST /login
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Request received", "method", "POST", "path", "/login")
@@ -183,39 +216,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Generate JWT token
 	// JWT token = "ticket" proving user logged in (contains user_id)
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		slog.Error("JWT_SECRET not set in environment")
-		errorResponseAuth(w, http.StatusInternalServerError, "Server configuration error")
-		return
-	}
-
-	// STEP 1: Create claims (data to put inside token)
-	// jwt.MapClaims: Just a map[string]interface{} - you already know this!
-	// "user_id": userID - So we know WHO this token belongs to
-	// "exp": Expiration time - Token becomes invalid after 24 hours
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(15 * time.Minute).Unix(), // Unix() converts time to NUMBER
-		// Why Unix()? JWT needs simple numbers, not complex Go time objects
-		// Example: time.Now().Unix() = 1736359530 (just a number)
-		// Add 24 hours = add 86400 seconds (24 * 60 * 60 = 86400)
-	}
-
-	// STEP 2: Create token object (NOT a string yet, just a Go object)
-	// jwt.SigningMethodHS256: Encryption method (standard, secure, don't worry about it)
-	// claims: The data map we just created above
-	// Think: Creating an unsigned document with your data inside
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	// STEP 3: Sign token and convert to string (this makes it official!)
-	// This is like putting a wax seal on a letter - proves it's authentic
-	// []byte(secret): Your secret key (converts string to bytes - library requirement)
-	// Returns: "eyJhbGci...xyz" (the actual JWT string user receives)
-	// Format: header.payload.signature (3 parts separated by dots)
-	// "The secret key is a string, but encryption libraries need bytes (raw data format), so we convert it with []byte(secret). This lets the library encrypt and sign the token."
-
-	tokenString, err := token.SignedString([]byte(secret))
+	tokenString, err := h.generateAccessToken(userID)
 	if err != nil {
 		slog.Error("Error generating JWT token", "error", err)
 		errorResponseAuth(w, http.StatusInternalServerError, "Failed to generate token")
@@ -279,24 +280,8 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	h.Cache.Del(r.Context(), key)
 
 	// Generate JWT token
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		slog.Error("JWT_SECRET not set in environment")
-		errorResponse(w, http.StatusInternalServerError, "Server configuration error")
-		return
-	}
-
-	// data to put inside the token
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(15 * time.Minute).Unix(),
-	}
-
-	// create token object
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
 	// signing token and covert to string
-	tokenString, err := token.SignedString([]byte(secret))
+	tokenString, err := h.generateAccessToken(userID)
 	if err != nil {
 		slog.Error("Error generating JWT token", "error", err)
 		errorResponse(w, http.StatusInternalServerError, "Failed to generate toten")

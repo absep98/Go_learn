@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,7 +19,7 @@ const (
 )
 
 // AuthMiddleware verifies JWT token before allowing access to protected routes
-func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func (h *Handler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("Auth middleware checking")
 
@@ -44,7 +43,7 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// STEP 3: Verify token is valid and extract claims
-		claims, err := validateToken(tokenString)
+		claims, err := h.validateToken(tokenString)
 		if err != nil {
 			slog.Warn("Token validation failed", "error", err)
 			errorResponseAuth(w, http.StatusUnauthorized, "Invalid or expired token")
@@ -69,10 +68,9 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // validateToken verifies JWT token signature and returns claims
-func validateToken(tokenString string) (jwt.MapClaims, error) {
-	// Get secret key from environment
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
+func (h *Handler) validateToken(tokenString string) (jwt.MapClaims, error) {
+
+	if h.JWTSecret == "" {
 		return nil, fmt.Errorf("JWT_SECRET not configured")
 	}
 
@@ -84,7 +82,7 @@ func validateToken(tokenString string) (jwt.MapClaims, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(secret), nil
+		return []byte(h.JWTSecret), nil
 	})
 
 	if err != nil {
