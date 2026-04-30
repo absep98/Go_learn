@@ -284,7 +284,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := h.generateAccessToken(userID)
 	if err != nil {
 		slog.Error("Error generating JWT token", "error", err)
-		errorResponse(w, http.StatusInternalServerError, "Failed to generate toten")
+		errorResponse(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 

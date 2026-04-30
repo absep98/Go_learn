@@ -115,7 +115,7 @@ func processJob(job Job) {
 // Drain workers after shutdown is initiated
 func DrainWorkers() {
 	close(JobQueue) // unblocks idle workers
-	wg.Wait()       // waits for in-glight jobs
+	wg.Wait()       // waits for in-flight jobs
 }
 
 // ========================================
@@ -167,10 +167,47 @@ Reason: cached list is now stale (missing the new entry).
 Next GET will miss cache, fetch fresh from DB, re-cache updated list.
 Pattern: every write must invalidate related cache keys.
 
+LOAD SHEDDING (what happens when queue is full):
+AddJob uses select+default — non-blocking channel send:
+
+  select {
+  case JobQueue <- job:   // space available → enqueue
+  default:                // full → drop immediately, log warning
+  }
+
+Why drop instead of block?
+AddJob is called INSIDE the HTTP handler. If it blocked, the user's HTTP response
+would also block — defeating the entire purpose of background processing.
+The HTTP handler must return fast. The webhook is a best-effort side effect:
+the entry IS saved to DB (that's the core operation), webhook delivery is optional.
+
+Load shedding options compared:
+  Drop (current):       log warning, discard job     — webhook missed, user unaffected
+  Block:                wait for queue space         — HTTP handler hangs, bad UX
+  Grow queue unbounded: always accept                — OOM crash under sustained load
+  Persist to DB:        save failed jobs for retry   — no data loss, production choice
+
+GRACEFUL SHUTDOWN ORDER:
+  1. OS sends SIGINT (Ctrl+C) → received on quit channel
+  2. server.Shutdown(ctx)     → stop accepting NEW HTTP requests
+                                wait for in-flight HTTP handlers to finish (5s timeout)
+  3. worker.DrainWorkers()    → close(JobQueue) stops new jobs being picked up
+                                wg.Wait() blocks until all running workers finish
+
+Why server.Shutdown() BEFORE DrainWorkers()?
+  HTTP handlers call AddJob(). If we drained workers first, an HTTP handler
+  could still be running and call AddJob() on a closed channel → panic.
+  We must stop the HTTP layer (the job producer) before stopping the workers
+  (the job consumers). Producer must stop before consumer stops.
+
+Why close(JobQueue) in DrainWorkers()?
+  Workers sit in `for job := range JobQueue` — they block waiting for jobs.
+  Closing the channel unblocks all idle workers and signals them to exit.
+  wg.Wait() then waits for currently-running workers to finish their job.
+
 TRADE-OFFS:
 - Jobs dropped when queue full — acceptable for non-critical background work
 - No retry on failed jobs — production would use a persistent queue (Redis, RabbitMQ)
-- No graceful drain on shutdown — production would drain queue before exiting
 */
 
 // AddJob adds a new job to the queue

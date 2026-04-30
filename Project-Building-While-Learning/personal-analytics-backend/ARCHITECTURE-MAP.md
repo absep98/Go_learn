@@ -11,13 +11,13 @@ USER SENDS REQUEST
         ↓
    [main.go] - Routes requests to handlers
         ↓
-   [middleware.go] - Checks JWT token (if protected route)
+   [middleware chain] - RequestID → Timeout → Metrics → RateLimit → Logging → [Auth] → Handler
         ↓
    [handlers/*.go] - Processes request, validates data
         ↓
-   [db/db.go] - Saves/retrieves from database
-        ↓
-   [data.db] - SQLite database file
+        ├── [db/db.go]        - Saves/retrieves from PostgreSQL
+        ├── [cache/cache.go]  - Reads/writes Redis cache (entry listings)
+        └── [worker/worker.go]- Fires background jobs (webhooks)
         ↓
    RESPONSE SENT BACK
 ```
@@ -28,416 +28,535 @@ USER SENDS REQUEST
 
 ### **cmd/server/main.go** (Entry Point)
 
-**What it does:** Starts server, registers routes
+**What it does:** Loads config, initialises Postgres + Redis, wires Handler, starts worker pool, registers routes, handles graceful shutdown.
 
 ```
 Routes:
 ├── /health      → No auth needed
 ├── /ping        → No auth needed
-├── /register    → No auth needed (anyone can register)
-├── /login       → No auth needed (anyone can login)
-└── /entries     → 🔒 PROTECTED (needs JWT token)
-                   Wrapped with AuthMiddleware
+├── /register    → No auth needed
+├── /login       → No auth needed
+├── /refresh     → No auth needed (refresh token proves identity via Redis)
+├── /logout      → No auth needed
+├── /metrics     → No auth needed
+└── /entries     → 🔒 PROTECTED
+                   POST   → CreateEntry
+                   GET    → GetEntries
+                   PATCH  → UpdateEntry
+                   DELETE → DeleteEntry
 ```
 
-**Key line:**
-
-```go
-http.HandleFunc("/entries", handlers.AuthMiddleware(func...))
-                            ↑ This wraps the handler with protection
+Every route is wrapped with the full middleware chain:
 ```
+RequestIDMiddleware → TimeoutMiddleware → MetricsMiddleware → RateLimitMiddleware → LoggingMiddleware → [AuthMiddleware → UserRateLimitMiddleware] → Handler
+```
+AuthMiddleware and UserRateLimitMiddleware only appear on /entries.
 
 ---
 
-### **internal/handlers/middleware.go** (Security Guard)
+### **internal/handlers/middleware.go** (Middleware layer)
 
-**What it does:** Checks if user is logged in before allowing access
+Contains multiple middlewares — each wraps the next like Russian dolls:
 
+| Middleware | What it does | Degrades if down? |
+|---|---|---|
+| RequestIDMiddleware | Generates UUID, adds to context + response header | — |
+| TimeoutMiddleware | Cancels request after 30s, returns 503 | — |
+| MetricsMiddleware | Counts requests/errors per endpoint | — |
+| RateLimitMiddleware | IP-based limit via Redis INCR | ✅ fail open (allow) |
+| LoggingMiddleware | Logs method, path, duration, status | — |
+| AuthMiddleware | Validates JWT, puts user_id in context | — |
+| UserRateLimitMiddleware | Per-user limit via Redis INCR | ✅ fail open (allow) |
+
+**AuthMiddleware flow:**
 ```
-Request arrives
-    ↓
 1. Get "Authorization" header
-    ↓
-2. Extract JWT token (remove "Bearer " prefix)
-    ↓
-3. Verify token with secret key
-    ↓
-4. Extract user_id from token
-    ↓
-5. Put user_id in request context (like a backpack)
-    ↓
-6. Pass request to next handler
+2. Strip "Bearer " prefix → token string
+3. validateToken() → verify signature + expiry with JWTSecret
+4. Extract user_id from claims
+5. context.WithValue(r.Context(), userIDKey, userID)
+6. Call next handler
+If anything fails → 401 Unauthorized
 ```
-
-**If anything fails → 401 Unauthorized error**
 
 ---
 
-### **internal/handlers/auth.go** (Login/Register)
+### **internal/handlers/auth.go** (Register / Login / Refresh / Logout)
 
-**What it does:** Creates user accounts and issues JWT tokens
+**What it does:** Manages user identity and session tokens.
 
 #### Register Flow
-
 ```
-POST /register
-{"email": "user@example.com", "password": "secret"}
+POST /register {"email", "password"}
     ↓
-1. Validate email (not empty, has @)
+1. Validate email (not empty, contains @)
 2. Validate password (not empty, >= 6 chars)
-3. Hash password with bcrypt
-4. Save to database (users table)
-5. Return success with user_id
+3. bcrypt.GenerateFromPassword(password, cost=10)
+4. h.Store.CreateUser(email, hash) → PostgreSQL INSERT
+5. 201 {"success": true, "user_id": 42}
 ```
 
 #### Login Flow
-
 ```
-POST /login
-{"email": "user@example.com", "password": "secret"}
+POST /login {"email", "password"}
     ↓
-1. Validate email + password not empty
-2. Get user from database by email
-3. Compare password with stored hash (bcrypt)
-4. Generate JWT token with user_id inside
-5. Return token to user
+1. h.Store.GetUserByEmail(email) → fetch userID + passwordHash from DB
+2. bcrypt.CompareHashAndPassword(hash, password)
+3. h.generateAccessToken(userID) → JWT signed with h.JWTSecret, exp=15min
+4. uuid.New() → random UUID for refresh token
+5. h.Cache.Set("refresh_token:<uuid>", "<userID>", 7 days)
+6. 200 {"access_token": "eyJ...", "refresh_token": "<uuid>"}
 ```
 
-**User keeps this token and sends it with every request!**
+#### Refresh Flow
+```
+POST /refresh {"refresh_token": "<uuid>"}
+    ↓
+1. key = "refresh_token:" + uuid
+2. val = h.Cache.Get(key)  ← val IS the userID string ("42")
+3. userID = strconv.ParseInt(val)
+4. h.Cache.Del(key)                     ← old token consumed (rotation)
+5. h.generateAccessToken(userID)        ← new access token
+6. h.Cache.Set("refresh_token:<newUUID>", userID, 7 days)  ← new refresh token
+7. 200 {"access_token": "eyJ...", "refresh_token": "<newUUID>"}
+```
+Note: /refresh is NOT protected by AuthMiddleware. The refresh token itself proves identity via Redis lookup.
+
+#### Logout Flow
+```
+POST /logout {"refresh_token": "<uuid>"}
+    ↓
+1. h.Cache.Get("refresh_token:" + uuid)   ← verify it exists
+2. h.Cache.Del("refresh_token:" + uuid)   ← invalidate session
+3. 200 {"success": true}
+```
 
 ---
 
-### **internal/handlers/entries.go** (Data Operations)
+### **internal/handlers/entries.go** (Entry CRUD)
 
-**What it does:** Creates and retrieves user entries
+**What it does:** Creates, reads, updates, deletes journal entries. Cache-aside pattern on GET.
 
 #### Create Entry Flow
-
 ```
-POST /entries (🔒 protected)
-{"text": "Had a great day", "mood": 8, "category": "personal"}
+POST /entries {"text", "mood", "category"}
     ↓
-1. Middleware already verified user (user_id in context)
-2. Validate all fields (text, mood 1-10, category)
-3. Save to database with user_id
-4. Return success with entry_id
+1. user_id from context (set by AuthMiddleware)
+2. Validate text, mood (1-10), category
+3. h.Store.InsertEntry(userID, text, mood, category)
+4. h.Cache.Del("entries:user:<userID>:...")  ← invalidate cached list
+5. worker.AddJob(webhookPayload)             ← fire-and-forget notification
+6. 201 {"success": true, "id": 456}
 ```
 
-#### Get Entries Flow
-
+#### Get Entries Flow (cache-aside)
 ```
-GET /entries (🔒 protected)
+GET /entries?page=1&limit=10
     ↓
-1. Middleware already verified user (user_id in context)
-2. Get user_id from request context
-3. Fetch ONLY entries for this user from database
-4. Return entries array
+1. user_id from context
+2. cacheKey = "entries:user:<id>:page:<p>:limit:<l>"
+3. h.Cache.Get(cacheKey)
+   HIT  → write raw JSON to response, return immediately
+   MISS → query PostgreSQL → marshal JSON → h.Cache.Set(key, data, 60s) → respond
 ```
-
-**Key concept:** Each user only sees THEIR OWN entries!
 
 ---
 
 ### **internal/db/db.go** (Database Layer)
 
-**What it does:** Talks to SQLite database
+**What it does:** All PostgreSQL operations. Uses `modernc.org/sqlite` was replaced with `lib/pq` (PostgreSQL driver).
 
 #### Tables
-
 ```
 users table:
-├── id (auto-increment)
-├── email (unique)
-├── password_hash (bcrypt hash)
-└── created_at
+├── id            BIGSERIAL PRIMARY KEY
+├── email         TEXT UNIQUE NOT NULL
+├── password_hash TEXT NOT NULL
+└── created_at    TIMESTAMPTZ DEFAULT NOW()
 
 entries table:
-├── id (auto-increment)
-├── user_id (links to users.id)
-├── text
-├── mood
-├── category
-└── created_at
+├── id         BIGSERIAL PRIMARY KEY
+├── user_id    BIGINT REFERENCES users(id)
+├── text       TEXT NOT NULL
+├── mood       INTEGER (1-10)
+├── category   TEXT
+└── created_at TIMESTAMPTZ DEFAULT NOW()
 ```
 
-#### Functions
+Key: always uses `$1, $2` placeholders (PostgreSQL syntax, not `?`).
 
-- `InitDB()` - Opens database connection
-- `CreateUser()` - Inserts new user
-- `GetUserByEmail()` - Finds user for login
-- `InsertEntry()` - Creates new entry
-- `GetEntriesByUser()` - Gets entries for specific user
-- `CloseDB()` - Closes connection when server stops
+---
+
+## 🔴 REDIS — THREE USES
+
+This is the most commonly forgotten part. Redis is used for three completely separate purposes:
+
+### 1. Refresh Token Store (`auth.go`)
+```
+Key:   "refresh_token:<uuid>"
+Value: userID as string ("42")
+TTL:   7 days
+
+Set at: Login, Refresh (new token issued)
+Get at: Refresh, Logout (verify token exists)
+Del at: Refresh (token rotation), Logout (invalidation)
+```
+Behaviour if Redis down: Login returns 500 — hard failure, users cannot log in.
+
+### 2. Entry List Cache (`entries.go` + `cache/cache.go`)
+```
+Key:   "entries:user:<id>:page:<p>:limit:<l>"
+Value: JSON string of the entries response
+TTL:   60 seconds
+
+Set at: GET /entries on cache miss (after DB query)
+Get at: GET /entries (checked before DB)
+Del at: POST/PATCH/DELETE /entries (cache invalidation on write)
+```
+Behaviour if Redis down: circuit breaker opens → Get returns miss → falls through to PostgreSQL. Degrades gracefully (slower, not broken).
+
+### 3. Rate Limiting (`ratelimit.go`)
+```
+Key:   "ratelimit:<ip>"          (IP-based, RateLimitMiddleware)
+       "ratelimit:user:<userID>" (per-user, UserRateLimitMiddleware)
+Value: request count integer
+TTL:   1 minute (set only on first request, count==1)
+
+Commands: INCR key → returns new count. EXPIRE key 60 (first request only).
+```
+Behaviour if Redis down: `redis.Client.Incr()` returns error → `IsAllowed()` returns `true` → requests pass through unthrottled. Fails open intentionally — blocking all traffic because Redis is down would be worse than allowing unthrottled requests temporarily.
+
+### Redis Degradation Summary
+| Feature | Redis down behaviour |
+|---|---|
+| Rate limiting | Fail open — requests allowed |
+| Entry caching | Fail open — falls back to Postgres |
+| Refresh tokens | Hard fail — login returns 500 |
+
+---
+
+## ⚡ CIRCUIT BREAKER (`internal/circuitbreaker/circuitbreaker.go`)
+
+Wraps Redis cache operations (NOT rate limiting — that uses redis.Client directly).
+
+```
+3 states:
+
+CLOSED (normal):
+  Request → call Redis → success: reset failureCount
+                       → failure: failureCount++
+                         if failureCount >= 5 → switch to OPEN
+
+OPEN (Redis assumed down):
+  Request → reject immediately, return error (no Redis call)
+  After 30s cooldown → switch to HALF-OPEN
+
+HALF-OPEN (testing recovery):
+  ONE request allowed through
+  success → switch to CLOSED (recovered)
+  failure → switch back to OPEN (restart cooldown)
+```
+
+Key: circuit breaker does NOT retry. That's `retry.go`'s job. They do opposite things:
+- `retry.go` — keep trying (used at startup: InitRedis)
+- `circuitbreaker.go` — stop trying (used at runtime: cache operations)
+
+---
+
+## 🔧 WORKER POOL + WEBHOOK (`internal/worker/`, `internal/webhook/`)
+
+```
+POST /entries
+    ↓
+handler calls worker.AddJob(payload)   ← non-blocking, returns immediately
+    ↓ (background goroutine picks it up)
+worker.go → WebhookBreaker.Execute()   ← circuit breaker around webhook endpoint
+    ↓
+retry.Do(3 attempts, 500ms backoff)    ← retry transient failures
+    ↓
+webhook.HTTPSender.Send(url, payload)  ← single HTTP POST attempt
+```
+
+Why non-blocking: The HTTP handler must respond fast. Webhook delivery (which may take seconds + retries) happens in a background goroutine pool. User gets their 201 immediately.
+
+Pipeline layers:
+| Layer | Purpose |
+|---|---|
+| `AddJob()` | Enqueue job, never blocks the HTTP handler |
+| `WebhookBreaker` | Stop hammering a down webhook endpoint |
+| `retry.Do()` | Retry transient failures (network blips) |
+| `HTTPSender.Send()` | One HTTP POST attempt, 5s timeout |
+
+---
 
 ---
 
 ## 🔐 AUTHENTICATION FLOW (The Complete Journey)
 
-### **Registration:**
-
+### Registration
 ```
-1. User sends email + password
-2. Server hashes password with bcrypt
-3. Server saves email + hash to database
-4. Server returns "success"
+POST /register {"email", "password"}
+    ↓ validate → bcrypt hash → INSERT INTO users → 201 {user_id}
 ```
 
-### **Login:**
-
+### Login
 ```
-1. User sends email + password
-2. Server finds user by email
-3. Server compares password with stored hash
-4. If match → generate JWT token
-5. Token contains: {"user_id": 123, "exp": 1736445930}
-6. Server returns token to user
+POST /login {"email", "password"}
+    ↓ SELECT user → bcrypt compare → generate JWT (15min) → store refresh token in Redis (7d)
+    ↓ 200 {"access_token": "eyJ...", "refresh_token": "<uuid>"}
 ```
 
-### **Using Protected Routes:**
-
+### Protected Request
 ```
-1. User sends request with header:
-   Authorization: Bearer eyJhbGci...xyz
+GET /entries
+Header: Authorization: Bearer eyJhbGci...
 
-2. Middleware extracts token from header
+AuthMiddleware:
+1. Strip "Bearer " → token string
+2. jwt.ParseWithClaims(token, h.JWTSecret) → verify signature + expiry
+3. Extract user_id from claims
+4. context.WithValue → user_id travels to handler
+5. Handler reads: r.Context().Value(userIDKey).(int64)
+```
 
-3. Middleware verifies token:
-   - Is signature valid? (checks with JWT_SECRET)
-   - Has it expired? (checks "exp" claim)
+### Token Expired → Refresh
+```
+POST /refresh {"refresh_token": "<uuid>"}
+    ↓ Redis GET "refresh_token:<uuid>" → returns userID string
+    ↓ Redis DEL old token → generate new access token + new refresh UUID
+    ↓ Redis SET new token → 200 {new access_token, new refresh_token}
+```
 
-4. If valid → extract user_id from token
-
-5. Put user_id in context (backpack)
-
-6. Pass request to handler
-
-7. Handler gets user_id from context
-
-8. Handler uses user_id to fetch/save data
+### Logout
+```
+POST /logout {"refresh_token": "<uuid>"}
+    ↓ Redis DEL "refresh_token:<uuid>" → session invalidated
 ```
 
 ---
 
-## 🔑 KEY CONCEPTS (The "Why" Behind the Code)
+## 🔑 KEY CONCEPTS
 
-### **1. Why Hash Passwords?**
-
+### 1. Why Hash Passwords?
 ```
-Plain password in DB:  "mysecret123"  ← BAD! If DB leaked, all passwords exposed
-Hashed password in DB: "$2a$10$xyz..." ← GOOD! Can't reverse to get original
-```
-
-### **2. Why JWT Tokens?**
-
-```
-Without JWT:
-- User logs in → Server creates session in memory
-- Problem: Server needs to remember ALL logged-in users
-- Doesn't work with multiple servers
-
-With JWT:
-- User logs in → Server creates token (like a ticket)
-- Token contains user_id (who they are)
-- Token is signed (proves it's authentic)
-- User sends token with every request
-- Server doesn't need to remember anything!
+Plain in DB:  "mysecret123"     BAD — if DB leaks, all passwords exposed
+Hashed in DB: "$2a$10$xyz..."   GOOD — bcrypt is one-way + salted
+                                Same password hashed twice = different result
+                                bcrypt.CompareHashAndPassword re-applies same salt
 ```
 
-### **3. Why Middleware?**
-
+### 2. Why JWT + Refresh Tokens?
 ```
-Without Middleware:
-- Every handler copies same auth code
-- Easy to forget checking auth
-- Hard to maintain
+Access token (JWT, 15min):
+- Self-contained — server reads user_id without hitting DB
+- Short-lived — if stolen, expires fast
+- Cannot be revoked before expiry (stateless trade-off)
 
-With Middleware:
-- Auth code in ONE place
-- Wrap any route to protect it
-- Can't forget (route won't work without it)
+Refresh token (UUID in Redis, 7d):
+- Stored server-side — can be revoked by deleting from Redis
+- Not sent on every request — only used to get a new access token
+- Rotation on every refresh — old token deleted, new token issued
 ```
 
-### **4. Why Context?**
-
+### 3. Why Middleware Chaining?
 ```
-Problem: Middleware verifies user, but how does handler know WHO the user is?
+RequestID → Timeout → Metrics → RateLimit → Logging → Auth → UserRateLimit → Handler
 
-Solution: Context (like a backpack)
-- Middleware: "I verified this is user 123" → puts in context
-- Handler: "Let me check the context... oh, user 123!" → reads from context
-- Context travels with the request through all layers
+Each middleware calls next(w, r) to pass control inward.
+Return before next() = short-circuit (what RateLimit and Auth do on reject).
+Code AFTER next(w, r) runs on the way OUT (what Logging uses for duration).
+
+Order matters:
+- RequestID must be outermost → all downstream logs include request_id
+- Auth before UserRateLimit → UserRateLimit reads user_id set by Auth
+- RateLimit before Logging → no point logging a rate-limited request's duration
+```
+
+### 4. Why Context?
+```
+Problem: AuthMiddleware verifies JWT, but how does CreateEntry know the user_id?
+
+Solution: context.WithValue
+- Middleware: context.WithValue(r.Context(), userIDKey, int64(42))
+- Handler:    r.Context().Value(userIDKey).(int64)
+- Context is immutable and request-scoped — safe across goroutines
+```
+
+### 5. Why Dependency Injection (Handler struct)?
+```
+type Handler struct {
+    Store     Store   // interface — real PostgreSQL or FakeStore in tests
+    Cache     Cache   // interface — real Redis or FakeCache in tests
+    JWTSecret string  // no os.Getenv inside handlers
+}
+
+Without DI: handlers call os.Getenv("JWT_SECRET") directly → untestable
+With DI:    tests pass h := &Handler{JWTSecret: "test-secret"} → no env vars needed
 ```
 
 ---
 
-## 📊 DATA FLOW EXAMPLE
-
-### **Creating an Entry (Full Journey):**
+## 📊 DATA FLOW EXAMPLE — Creating an Entry (Full Journey)
 
 ```
-1. USER ACTION:
+1. CLIENT:
    POST /entries
-   Header: Authorization: Bearer eyJhbGci...xyz
-   Body: {"text": "Great day!", "mood": 9, "category": "work"}
+   Authorization: Bearer eyJhbGci...xyz
+   {"text": "Great day!", "mood": 9, "category": "work"}
 
-2. MAIN.GO:
-   "Request for /entries → route to AuthMiddleware(CreateEntry)"
+2. RequestIDMiddleware:   generate "abc-123", add to context + X-Request-ID header
 
-3. MIDDLEWARE.GO:
-   ├─ Get token: "eyJhbGci...xyz"
-   ├─ Verify with JWT_SECRET ✓
-   ├─ Extract user_id: 123
-   ├─ Put in context: {"user_id": 123}
-   └─ Call next handler (CreateEntry)
+3. TimeoutMiddleware:     start 30s countdown
 
-4. ENTRIES.GO (CreateEntry):
-   ├─ Get user_id from context: 123
-   ├─ Validate: text not empty ✓
-   ├─ Validate: mood 1-10 ✓
-   ├─ Validate: category not empty ✓
-   └─ Call db.InsertEntry(123, "Great day!", 9, "work")
+4. MetricsMiddleware:     increment in-flight counter
 
-5. DB.GO:
-   ├─ SQL: INSERT INTO entries (user_id, text, mood, category) VALUES (?, ?, ?, ?)
-   ├─ Execute with parameters: [123, "Great day!", 9, "work"]
-   ├─ Get inserted ID: 456
-   └─ Return ID to handler
+5. RateLimitMiddleware:   redis.Client.INCR("ratelimit:192.168.1.1")
+                          count=1 → redis.EXPIRE 60s → allow
 
-6. ENTRIES.GO:
-   └─ Return JSON: {"success": true, "message": "Entry created", "id": 456}
+6. LoggingMiddleware:     log "POST /entries started", start timer
 
-7. USER RECEIVES:
-   Status: 201 Created
-   Body: {"success": true, "message": "Entry created successfully", "id": 456}
+7. AuthMiddleware:        parse JWT → user_id=42 → context.WithValue
+
+8. UserRateLimitMiddleware: redis.Client.INCR("ratelimit:user:42") → allow
+
+9. CreateEntry handler:
+   ├── user_id = r.Context().Value(userIDKey).(int64)  → 42
+   ├── validate text, mood, category
+   ├── h.Store.InsertEntry(42, "Great day!", 9, "work")
+   │   └── INSERT INTO entries ... RETURNING id  → 456
+   ├── h.Cache.Del("entries:user:42:...")  ← invalidate cached list
+   └── worker.AddJob({userID:42, entryID:456, ...})  ← background, non-blocking
+
+10. LoggingMiddleware (on way out): log "POST /entries 201 in 12ms"
+
+11. CLIENT RECEIVES:
+    201 Created
+    X-Request-ID: abc-123
+    {"success": true, "id": 456}
+
+12. BACKGROUND (worker goroutine):
+    WebhookBreaker.Execute() → retry.Do(3x) → HTTPSender.Send(webhookURL, payload)
 ```
 
 ---
 
-## 🎯 COMMON PATTERNS (Memorize These, Not Syntax)
+## 🎯 COMMON PATTERNS
 
-### **Pattern 1: Handler Structure**
-
-```
-func Handler(w http.ResponseWriter, r *http.Request) {
-    1. Check method (POST/GET)
-    2. Parse request body (JSON)
-    3. Validate each field (early returns on error)
-    4. Call database function
-    5. Return JSON response
+### Pattern 1: Handler Structure
+```go
+func (h *Handler) SomeHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    var req SomeRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        respondJSON(w, http.StatusBadRequest, ...)
+        return
+    }
+    // validate fields with early returns
+    result, err := h.Store.DoSomething(r.Context(), req.Field)
+    if err != nil {
+        slog.Error("...", "error", err)
+        respondJSON(w, http.StatusInternalServerError, ...)
+        return
+    }
+    respondJSON(w, http.StatusOK, result)
 }
 ```
 
-### **Pattern 2: Database Function**
-
-```
-func DBFunction(params...) (result, error) {
-    1. Write SQL query with ? placeholders
-    2. Execute with DB.Exec() or DB.Query()
-    3. Handle errors
-    4. Return result
-}
-```
-
-### **Pattern 3: Error Handling**
-
-```
+### Pattern 2: Error Handling
+```go
 result, err := someFunction()
 if err != nil {
-    // Log error
-    // Return error response
+    slog.Error("operation failed", "error", err)
+    return fmt.Errorf("context: %w", err)
+}
+```
+
+### Pattern 3: Cache-Aside Read
+```go
+cached, err := h.Cache.Get(r.Context(), cacheKey)
+if err == nil {          // cache HIT
+    w.Header().Set("Content-Type", "application/json")
+    fmt.Fprint(w, cached)
     return
 }
-// Continue with result
+// cache MISS — query DB
+data, err := h.Store.GetSomething(r.Context(), ...)
+// store for next time
+h.Cache.Set(r.Context(), cacheKey, data, 60*time.Second)
 ```
 
-### **Pattern 4: JSON Response**
+### Pattern 4: Context Values
+```go
+// Set (in middleware):
+ctx := context.WithValue(r.Context(), userIDKey, int64(42))
+r = r.WithContext(ctx)
 
-```
-respondJSON(w, statusCode, dataStruct)
+// Get (in handler):
+userID := r.Context().Value(userIDKey).(int64)
 ```
 
 ---
 
 ## 💡 WHEN YOU FORGET SOMETHING
 
-### "How do I verify JWT token?"
-
-→ Look at `middleware.go` line 60-85
-
-### "How do I hash a password?"
-
-→ Look at `auth.go` line 95-100
-
-### "How do I get user_id from context?"
-
-→ Look at `entries.go` line 115-125
-
-### "How do I protect a route?"
-
-→ Look at `main.go` line 74 (wrap with AuthMiddleware)
+| Question | Where to look |
+|---|---|
+| How is JWT verified? | `middleware.go` → `validateToken()` |
+| Where does user_id come from in handlers? | `middleware.go` → `AuthMiddleware` sets it in context |
+| Where does userID come from in /refresh? | Redis value — stored at Login time as `fmt.Sprintf("%d", userID)` |
+| How is password hashed? | `auth.go` → `Register` → `bcrypt.GenerateFromPassword` |
+| How is refresh token stored? | `auth.go` → `Login` → `h.Cache.Set("refresh_token:"+uuid, userID, 7d)` |
+| What are the 3 Redis uses? | Refresh tokens, entry caching, rate limiting — see Redis section above |
+| What does circuit breaker protect? | Redis cache operations in `cache/cache.go` |
+| How does webhook fire? | `entries.go` → `worker.AddJob()` → background goroutine → retry → HTTP POST |
+| How to protect a route? | `main.go` → wrap with `h.AuthMiddleware(handler)` |
+| How to write a unit test? | `auth_test.go` — uses FakeStore/FakeCache, no DB needed |
+| How to write an integration test? | `entries_test.go` → `TestMain` checks `DB_HOST` env var |
 
 ---
 
-## 🚀 TESTING YOUR API
-
-### 1. Register a user
+## 🚀 RUNNING THE PROJECT
 
 ```powershell
-.\test-register.ps1
-```
+# Start server (requires .env with DB/Redis config)
+cd Project-Building-While-Learning\personal-analytics-backend
+go run cmd/server/main.go
 
-### 2. Login
+# Run unit tests only (no Docker needed)
+go test ./internal/handlers/ -v -run TestRegister
 
-```powershell
-.\test-login.ps1
-# Saves token in $token variable
-```
+# Run all tests including integration (Docker required)
+docker run --rm -v "C:\learning\Go_learn\Project-Building-While-Learning\personal-analytics-backend:/app" -w /app golang:1.25-alpine go test ./internal/handlers/ -v
 
-### 3. Access protected route
-
-```powershell
-.\test-middleware.ps1
-# Tests with/without token
-```
-
-### 4. Create entry
-
-```powershell
-# Start server first:
-go run .\cmd\server\main.go
-
-# In another terminal:
-$token = "paste_your_token_here"
-$headers = @{"Authorization" = "Bearer $token"}
-$body = @{text="Great day"; mood=9; category="work"} | ConvertTo-Json
-
-Invoke-RestMethod -Uri http://localhost:8080/entries `
-    -Method Post -Headers $headers -Body $body -ContentType "application/json"
+# Build check
+go build ./cmd/... ./internal/...
 ```
 
 ---
 
-## ✅ WHAT YOU'VE BUILT (Be Proud!)
+## ✅ WHAT YOU'VE BUILT
 
-- ✅ User registration with secure password hashing
-- ✅ User login with JWT token generation
-- ✅ Protected routes requiring authentication
+- ✅ User registration with bcrypt password hashing
+- ✅ JWT authentication (15min access tokens, 7d refresh tokens)
+- ✅ Refresh token rotation + logout (Redis-backed sessions)
+- ✅ Protected routes with middleware chain
 - ✅ User-specific data isolation
-- ✅ Proper error handling and validation
-- ✅ RESTful API with JSON responses
-- ✅ SQLite database with proper schema
-
-**This is a production-ready authentication system!**
-
----
-
-## 📚 NEXT STEPS (When Ready)
-
-**Don't do these now. Just know they exist:**
-
-1. Week 2 Day 10: Protect POST /entries endpoint
-2. Week 2 Day 11: Add token expiration handling
-3. Week 2 Day 12: Testing and refinement
+- ✅ PostgreSQL with golang-migrate migrations
+- ✅ Redis caching (cache-aside, 60s TTL, invalidation on write)
+- ✅ IP + per-user rate limiting via Redis
+- ✅ Circuit breaker (3-state: closed → open → half-open)
+- ✅ Retry with exponential backoff
+- ✅ Background worker pool + webhook delivery
+- ✅ Graceful shutdown (SIGINT/SIGTERM handling)
+- ✅ Structured logging (slog, JSON output, request ID tracing)
+- ✅ Request timeout middleware
+- ✅ Metrics endpoint
+- ✅ Dependency injection (Handler struct, testable without DB)
+- ✅ Unit tests (FakeStore/FakeCache) + integration tests (real Postgres)
+- ✅ Multi-stage Docker build (~15MB image)
 4. Week 2 Day 13: Documentation and review
 
 **For now: Just USE what you built. Understanding comes from using, not reading.**

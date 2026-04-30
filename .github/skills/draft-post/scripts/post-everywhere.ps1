@@ -180,12 +180,23 @@ if (Test-Path $blueskyEnv) {
     try {
         # Auto-inject dev.to URL captured earlier as the link card URL
         if ($devtoArticleURL -ne "") { $env:BSKY_DEVTO_URL = $devtoArticleURL }
+
+        # Try Go binary first, fall back to PowerShell script if blocked by Application Control
+        $bskyPS = Join-Path $scriptRoot "post-to-bluesky.ps1"
         Push-Location $blueskyDir
         $output = & go run main.go $Mode $File 2>&1 | Out-String
+        $goExitCode = $LASTEXITCODE
         Pop-Location
+
+        if ($goExitCode -ne 0 -and $output -match "Application Control") {
+            # Go binary blocked — use PowerShell fallback
+            $output = & $bskyPS -Mode $Mode -File $File 2>&1 | Out-String
+            $goExitCode = $LASTEXITCODE
+        }
+
         $env:BSKY_DEVTO_URL = ""  # Reset after use
 
-        if ($LASTEXITCODE -eq 0) {
+        if ($goExitCode -eq 0) {
             Write-Host " OK" -ForegroundColor Green
             $results += [PSCustomObject]@{ Platform = "Bluesky"; Status = "Success"; Detail = ($output -split "`n" | Where-Object { $_ -match "URL|ID|Draft|dry-run" } | Select-Object -First 1).Trim() }
         }
