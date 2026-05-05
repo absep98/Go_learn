@@ -12,20 +12,30 @@ type Sender interface {
 	Send(url string, payload interface{}) error
 }
 
-type HTTPSender struct{} // real sender
+type HTTPSender struct {
+	Secret string
+}                        // real sender
 type NoOpSender struct{} // test/fake sender
 
 func (h HTTPSender) Send(url string, payload interface{}) error {
 	data, err := json.Marshal(payload)
 
 	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
+		return fmt.Errorf("failed to create request %w", err)
 	}
+
+	encodedString := Sign(data, h.Secret)
 
 	body := bytes.NewReader(data)
 
-	resp, err := httpClient.Post(url, "application/json", body)
+	req, err := http.NewRequest("POST", url, body)
 
+	if err != nil {
+		return fmt.Errorf("Failed to create the signature")
+	}
+	req.Header.Set("X-Webhook-Signature", encodedString)
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http post failed: %w", err)
 	}

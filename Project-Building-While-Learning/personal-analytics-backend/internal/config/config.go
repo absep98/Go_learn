@@ -42,6 +42,9 @@ type Config struct {
 
 	// WebhookURL
 	WebhookURL string
+
+	// WebhookSecret
+	WebhookSecret string
 }
 
 func Load() (*Config, error) {
@@ -142,5 +145,8 @@ func Load() (*Config, error) {
 	// Load webhookURL
 	webhookurl := os.Getenv("WEBHOOK_URL")
 	cfg.WebhookURL = webhookurl
+
+	WebhookSecret := os.Getenv("WEBHOOK_SECRET")
+	cfg.WebhookSecret = WebhookSecret
 	return cfg, nil
 }
