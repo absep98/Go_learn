@@ -1,0 +1,28 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Step 1 Checkout code
+        uses: actions/checkout@v4
+
+      - name: Step 2 Set up SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan 140.245.202.129 >> ~/.ssh/known_hosts
+
+      - name: Step 3 Deploy
+        run: |
+          ssh -i ~/.ssh/id_rsa ubuntu@140.245.202.129 "
+          cd ~/Go_learn/Project-Building-While-Learning/personal-analytics-backend &&
+          git pull &&
+          docker compose up -d --build
+          "
