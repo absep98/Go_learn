@@ -25,8 +25,8 @@ services:
     # Format: "HOST:CONTAINER"
     # "8080:8080" means: when you hit localhost:8080 on your machine,
     # docker forwards that traffic to port 8080 inside the container
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
 
     # Environment variables injected into the container at runtime.
     # These replace os.Getenv() calls in your Go code.
@@ -95,3 +95,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  nginx:
+    image: nginx:alpine
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot-etc:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    depends_on:
+      - app
+
+
+  certbot:
+    image: certbot/certbot
+
+    volumes:
+      
+      - certbot-etc:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    
+    command: certonly --webroot --webroot-path=/var/www/certbot --email absep98@gmail.com --agree-tos --no-eff-email -d aksharma.duckdns.org
+
+
+volumes:
+  certbot-etc:
+  certbot-www:

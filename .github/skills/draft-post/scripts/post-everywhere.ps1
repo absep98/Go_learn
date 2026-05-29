@@ -288,13 +288,29 @@ Write-Host ""
 Write-Host "--- (copied to clipboard) ---" -ForegroundColor DarkGray
 $aksExplorerText | Set-Clipboard
 
-# ── Medium (manual import) ────────────────────────────────────
+# ── Substack (monetization for Indian creators) ───────────────
 Write-Host ""
-Write-Host "=== Medium (manual import - earns money!) ===" -ForegroundColor Green
-Write-Host "1. Go to: https://medium.com/p/import" -ForegroundColor DarkGray
-Write-Host "2. Paste this URL to import:" -ForegroundColor DarkGray
-Write-Host "   $articleURL" -ForegroundColor White
-Write-Host "3. Add topics: Go, Backend Development, Programming, Learning To Code, Build In Public" -ForegroundColor DarkGray
-Write-Host "4. Check 'Paywall this story' and Publish" -ForegroundColor DarkGray
-Write-Host "5. After publishing: ... > Story settings > Canonical link > paste the dev.to URL" -ForegroundColor DarkGray
-Write-Host "6. Copy the FRIEND LINK: ... > Copy friend link, use it for social posts instead of dev.to" -ForegroundColor Yellow
+Write-Host "=== Substack Paid Setup (earns money - works in India!) ===" -ForegroundColor Green
+Write-Host "Medium's Partner Program doesn't pay Indian creators. Use Substack instead:" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "ONE-TIME SETUP (if not done yet):" -ForegroundColor Yellow
+Write-Host "1. Go to: https://substack.com/publish/payments" -ForegroundColor DarkGray
+Write-Host "2. Enable paid subscriptions (Stripe India supported)" -ForegroundColor DarkGray
+Write-Host "3. Set a monthly price (e.g. $5/month)" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "FOR THIS POST — share the Substack link on X/Twitter:" -ForegroundColor Yellow
+
+# Extract substack URL from results if available
+$substackResult = $results | Where-Object { $_.Platform -eq "Substack" -and $_.Status -eq "Success" }
+$substackURL = ""
+if ($substackResult -and $substackResult.Detail -match "(https://\S+substack\S+)") {
+    $substackURL = $Matches[1]
+}
+
+if ($substackURL) {
+    Write-Host "   $substackURL" -ForegroundColor White
+    Write-Host "(Use this URL in your X/Twitter thread instead of the dev.to link)" -ForegroundColor DarkGray
+} else {
+    Write-Host "   https://abhisheksharma539226.substack.com" -ForegroundColor White
+    Write-Host "(Check Substack dashboard for the direct post URL)" -ForegroundColor DarkGray
+}

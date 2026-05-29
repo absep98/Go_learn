@@ -58,7 +58,7 @@ function parseFrontmatter(raw) {
  */
 function markdownToProseMirror(md) {
     const doc = { type: "doc", content: [] };
-    const lines = md.split("\n");
+    const lines = md.replace(/\r\n/g, "\n").split("\n");
     let i = 0;
     while (i < lines.length) {
         const line = lines[i];

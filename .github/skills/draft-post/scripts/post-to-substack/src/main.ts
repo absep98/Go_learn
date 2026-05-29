@@ -92,7 +92,7 @@ interface PMNode {
  */
 function markdownToProseMirror(md: string): string {
   const doc: PMNode = { type: "doc", content: [] };
-  const lines = md.split("\n");
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
   let i = 0;
 
   while (i < lines.length) {
