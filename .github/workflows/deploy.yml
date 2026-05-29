@@ -21,7 +21,7 @@ jobs:
 
       - name: Step 3 Deploy
         run: |
-          ssh -i ~/.ssh/id_rsa ubuntu@140.245.202.129 "
+          ssh -o ServerAliveInterval=60 -o ServerAliveCountMax=10 -i ~/.ssh/id_rsa ubuntu@140.245.202.129 "
           cd ~/Go_learn/Project-Building-While-Learning/personal-analytics-backend &&
           git pull &&
           docker compose up -d --build
