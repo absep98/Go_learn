@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"personal-analytics-backend/internal/models"
-
+	"encoding/json"
 	// The underscore _ means "blank import"
 	// // You DON'T call any functions from it
 	// So why import it if you don't use it?
@@ -352,6 +352,27 @@ func (p *PostgresStore) DeleteEntry(ctx context.Context, entryId int, userID int
 		return 0, err
 	}
 	return rowAffected, nil
+}
+
+
+func InsertFailedJob(job_type string, payload interface{}, errMsg string) error {
+
+	query := `INSERT INTO failed_jobs (job_type, payload, error) VALUES($1, $2, $3) RETURNING id`
+	
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	var id int64
+	err = DB.QueryRowContext(context.Background(), query, job_type, payloadJSON, errMsg).Scan(&id)
+	// "Execute the query and fill in the ? marks with actual values."
+	if err != nil {
+		return err
+	}
+
+	slog.Debug("Failed job inserted", "entry_id", id)
+	return nil
 }
 
 // CloseDB closes the database connection

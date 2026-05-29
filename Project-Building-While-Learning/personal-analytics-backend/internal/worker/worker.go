@@ -5,6 +5,7 @@ import (
 	"personal-analytics-backend/internal/circuitbreaker"
 	"personal-analytics-backend/internal/retry"
 	"personal-analytics-backend/internal/webhook"
+	"personal-analytics-backend/internal/db"
 	"sync"
 	"time"
 )
@@ -92,7 +93,8 @@ func processJob(job Job) {
 		})
 
 		if err != nil {
-			slog.Error(err.Error())
+			slog.Error("job failed, saving to dead letter queue", "error", err)
+			db.InsertFailedJob(job.Type, job.Payload, err.Error())
 		}
 
 	case "entry_deleted":
@@ -104,7 +106,8 @@ func processJob(job Job) {
 		})
 
 		if err != nil {
-			slog.Error(err.Error())
+			slog.Error("job failed, saving to dead letter queue", "error", err)
+			db.InsertFailedJob(job.Type, job.Payload, err.Error())
 		}
 
 	default:
