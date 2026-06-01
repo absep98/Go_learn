@@ -160,6 +160,10 @@ func main() {
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
 			handlers.LoggingMiddleware(handlers.GetMetrics))))))
 
+	http.HandleFunc("/failed-jobs", handlers.RequestIDMiddleware(
+		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
+			handlers.LoggingMiddleware(handlers.GetFailedJobs))))))
+
 	http.HandleFunc("/logout", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
 			handlers.LoggingMiddleware(h.Logout))))))

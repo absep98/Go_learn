@@ -27,6 +27,17 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+
+// FailedJob represents a failed jobs data
+type FailedJob struct {
+	ID 			int64 `json:"id"`
+	JobType 	string `json:"job_type"`
+	Payload		[]byte `json:"payload"`
+	Error 		string `json:"error"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+
 // =============================================================================
 // WHY THIS STRUCTURE?
 // =============================================================================

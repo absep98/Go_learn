@@ -375,6 +375,33 @@ func InsertFailedJob(job_type string, payload interface{}, errMsg string) error 
 	return nil
 }
 
+
+func GetFailedJobs() ([]models.FailedJob, error) {
+
+	query := `SELECT id, job_type, payload, error, created_at FROM failed_jobs ORDER BY created_at DESC`
+
+	rows, err := DB.QueryContext(context.Background(), query)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var failedJobs []models.FailedJob
+
+	for rows.Next() {
+		var failedJob  models.FailedJob
+
+		err := rows.Scan(&failedJob.ID, &failedJob.JobType, &failedJob.Payload, &failedJob.Error, &failedJob.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		failedJobs  = append(failedJobs, failedJob)
+	}
+	return failedJobs, nil
+}
+
 // CloseDB closes the database connection
 func CloseDB() {
 	// Why Close DB Connection When Server Closes?
