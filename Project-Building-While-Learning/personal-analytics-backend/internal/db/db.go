@@ -387,7 +387,7 @@ func GetFailedJobs() ([]models.FailedJob, error) {
 
 	defer rows.Close()
 
-	var failedJobs []models.FailedJob
+	failedJobs := make([]models.FailedJob, 0)
 
 	for rows.Next() {
 		var failedJob  models.FailedJob
