@@ -102,8 +102,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: go run main.go draft <markdown-file>")
 			os.Exit(1)
 		}
-		title, _, _ := parseMarkdownFile(os.Args[2])
-		text := buildPostText(title)
+		_, _, body := parseMarkdownFile(os.Args[2])
+		text := buildPostText(body)
 		fmt.Println("=== DRY RUN (would post) ===")
 		fmt.Printf("Text (%d chars):\n%s\n", len(text), text)
 		fmt.Println("Draft ID: dry-run")
@@ -112,9 +112,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: go run main.go publish <markdown-file>")
 			os.Exit(1)
 		}
-		title, tags, _ := parseMarkdownFile(os.Args[2])
+		title, tags, body := parseMarkdownFile(os.Args[2])
 		devtoURL := os.Getenv("BSKY_DEVTO_URL")
-		postText := buildPostText(title)
+		postText := buildPostText(body)
 
 		// Add hashtags from tags, respecting 300 grapheme limit
 		hashtagLine := ""
@@ -139,19 +139,14 @@ func main() {
 	}
 }
 
-func buildPostText(title string) string {
-	base := fmt.Sprintf("New post: %s\n\nRead the full article below 👇", title)
-	// Bluesky has 300 grapheme limit; truncate title if needed
-	if utf8.RuneCountInString(base) > 250 {
-		// Leave room for hashtags (~50 chars)
-		maxTitleRunes := 250 - utf8.RuneCountInString("New post: \n\nRead the full article below 👇")
-		runes := []rune(title)
-		if len(runes) > maxTitleRunes {
-			title = string(runes[:maxTitleRunes-1]) + "…"
-		}
-		base = fmt.Sprintf("New post: %s\n\nRead the full article below 👇", title)
+func buildPostText(body string) string {
+	// Bluesky has 300 grapheme limit; leave room for hashtags (~50 chars)
+	const maxRunes = 250
+	runes := []rune(body)
+	if len(runes) > maxRunes {
+		body = string(runes[:maxRunes-1]) + "…"
 	}
-	return base
+	return body
 }
 
 // createSession authenticates with Bluesky using handle + app password

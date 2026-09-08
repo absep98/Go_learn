@@ -47,8 +47,8 @@ func main() {
 		doMe(token)
 	case "draft":
 		requireFile()
-		title, tags, _ := parseMarkdownFile(os.Args[2])
-		text := buildPostText(title, tags)
+		_, tags, body := parseMarkdownFile(os.Args[2])
+		text := buildPostText(body, tags)
 		devtoURL := getDevtoURL()
 		fmt.Println("=== DRY RUN (would post) ===")
 		fmt.Printf("Text (%d chars):\n%s\n", len(text), text)
@@ -67,8 +67,8 @@ func main() {
 				authorURN = fetchAndSavePersonURN(token)
 			}
 		}
-		title, tags, _ := parseMarkdownFile(os.Args[2])
-		text := buildPostText(title, tags)
+		title, tags, body := parseMarkdownFile(os.Args[2])
+		text := buildPostText(body, tags)
 		devtoURL := getDevtoURL()
 		doPublish(token, authorURN, text, title, devtoURL)
 	default:
@@ -378,8 +378,8 @@ func doPublish(token, personURN, text, title, devtoURL string) {
 
 // ── Helpers ──────────────────────────────────────────────────
 
-func buildPostText(title string, tags []string) string {
-	text := fmt.Sprintf("%s\n\nNew post from my \"Learning Go in Public\" series. Read the full article below 👇", title)
+func buildPostText(body string, tags []string) string {
+	text := body
 
 	if len(tags) > 0 {
 		hashtags := ""
