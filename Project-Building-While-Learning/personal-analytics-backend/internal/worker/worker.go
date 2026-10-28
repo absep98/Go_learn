@@ -3,9 +3,9 @@ package worker
 import (
 	"log/slog"
 	"personal-analytics-backend/internal/circuitbreaker"
+	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/retry"
 	"personal-analytics-backend/internal/webhook"
-	"personal-analytics-backend/internal/db"
 	"sync"
 	"time"
 )
@@ -36,20 +36,37 @@ var webhookURL string
 
 var sender webhook.Sender // package-level, holds whatever Sender is injected
 
-// This is for waitgroup of workers
+// wg counts running WORKERS (not jobs). DrainWorkers waits for all of them to exit.
 var wg sync.WaitGroup
+
+// queueMu guards JobQueue against being closed while AddJob sends on it.
+// AddJob holds the read lock (many handlers can enqueue at once);
+// DrainWorkers takes the write lock to flip queueClosed and close the channel.
+var (
+	queueMu     sync.RWMutex
+	queueClosed bool
+)
 
 // StartWorkerPool starts N workers that listen for jobs
 // Each worker is like a "chef" waiting for orders
 func StartWorkerPool(numWorkers int, url string, s webhook.Sender) {
+	queueMu.Lock()
+	defer queueMu.Unlock()
+
 	// Create the job queue (buffered channel with capacity 100)
 	// Buffer = how many jobs can wait in line before blocking
 	JobQueue = make(chan Job, 100)
+	queueClosed = false
 
 	webhookURL = url
 
 	sender = s
-	// Start the workers (each runs in its own goroutine)
+
+	// FIX: Add BEFORE starting the goroutines. The first version called
+	// wg.Add(1) inside the worker after it received a job, so Wait() could
+	// observe a zero counter while jobs were still buffered and return early
+	// (and Add-during-Wait is a WaitGroup misuse the runtime panics on).
+	wg.Add(numWorkers)
 	for i := 1; i <= numWorkers; i++ {
 		go worker(i) // "go" = run in background
 	}
@@ -57,25 +74,20 @@ func StartWorkerPool(numWorkers int, url string, s webhook.Sender) {
 	slog.Info("Worker pool started", "num_workers", numWorkers, "queue_capacity", 100)
 }
 
-// worker is a single worker that processes jobs from the queue
-// It runs forever, waiting for jobs
+// worker is a single worker that processes jobs from the queue.
+// It exits only after JobQueue is closed AND every buffered job is drained.
 func worker(id int) {
-	// This loop runs FOREVER (until program exits)
-	for job := range JobQueue {
-		// "range JobQueue" = wait for next job, then process it
-		// When JobQueue is closed, this loop exits
+	defer wg.Done()
 
-		// increment: job starting
-		wg.Add(1)
+	// "range JobQueue" = wait for next job, then process it.
+	// When JobQueue is closed, the loop still delivers every buffered job, then exits.
+	for job := range JobQueue {
 		slog.Info("Worker processing job", "worker_id", id, "job_type", job.Type)
 
 		// Process the job based on its type
 		processJob(job)
 
 		slog.Info("Worker completed job", "worker_id", id, "job_type", job.Type)
-
-		// Worker is done with job
-		wg.Done()
 	}
 }
 
@@ -93,8 +105,7 @@ func processJob(job Job) {
 		})
 
 		if err != nil {
-			slog.Error("job failed, saving to dead letter queue", "error", err)
-			db.InsertFailedJob(job.Type, job.Payload, err.Error())
+			deadLetter(job, err)
 		}
 
 	case "entry_deleted":
@@ -106,8 +117,7 @@ func processJob(job Job) {
 		})
 
 		if err != nil {
-			slog.Error("job failed, saving to dead letter queue", "error", err)
-			db.InsertFailedJob(job.Type, job.Payload, err.Error())
+			deadLetter(job, err)
 		}
 
 	default:
@@ -115,10 +125,31 @@ func processJob(job Job) {
 	}
 }
 
-// Drain workers after shutdown is initiated
+// deadLetter persists a job that exhausted its retries so an operator can
+// inspect or replay it via /failed-jobs. If even that insert fails, the job is
+// lost — log it loudly with enough context to reconstruct it by hand.
+func deadLetter(job Job, jobErr error) {
+	slog.Error("job failed, saving to dead letter queue", "job_type", job.Type, "error", jobErr)
+	if err := db.InsertFailedJob(job.Type, job.Payload, jobErr.Error()); err != nil {
+		slog.Error("dead-letter insert failed, job lost",
+			"job_type", job.Type, "payload", job.Payload, "job_error", jobErr, "error", err)
+	}
+}
+
+// DrainWorkers stops accepting jobs, then blocks until every job already
+// accepted has been processed. Safe to call more than once.
 func DrainWorkers() {
-	close(JobQueue) // unblocks idle workers
-	wg.Wait()       // waits for in-flight jobs
+	queueMu.Lock()
+	if queueClosed {
+		queueMu.Unlock()
+		wg.Wait()
+		return
+	}
+	queueClosed = true
+	close(JobQueue) // no AddJob can be mid-send: they all hold the read lock
+	queueMu.Unlock()
+
+	wg.Wait() // workers exit once the buffer is empty
 }
 
 // ========================================
@@ -211,11 +242,26 @@ Why close(JobQueue) in DrainWorkers()?
 TRADE-OFFS:
 - Jobs dropped when queue full — acceptable for non-critical background work
 - No retry on failed jobs — production would use a persistent queue (Redis, RabbitMQ)
+
+UPDATE — "producer stops before consumer" was not enough (found with go test -race):
+server.Shutdown() only waits for handlers that are still attached to a
+connection. A handler that outlived its request timeout keeps running in the
+background and can call AddJob AFTER close(JobQueue) → "send on closed channel"
+panic. AddJob now checks queueClosed under a read lock and drops the job
+instead; DrainWorkers takes the write lock to close. See worker_test.go.
 */
 
 // AddJob adds a new job to the queue
 // This is what handlers call to schedule background work
 func AddJob(jobType string, payload interface{}) {
+	queueMu.RLock()
+	defer queueMu.RUnlock()
+
+	if queueClosed || JobQueue == nil {
+		slog.Warn("Worker pool not accepting jobs (shutting down), dropping job", "job_type", jobType)
+		return
+	}
+
 	// Non-blocking send (if queue is full, log warning)
 	select {
 	case JobQueue <- Job{Type: jobType, Payload: payload}:

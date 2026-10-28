@@ -49,31 +49,34 @@ A: InsertEntry returns int64. GetEntryByID expects int.
 */
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"testing"
+
+	"personal-analytics-backend/internal/testdb"
 
 	_ "github.com/lib/pq"
 )
 
 func TestMain(m *testing.M) {
-	host := os.Getenv("DB_HOST")
-
-	if host == "" {
+	// A database of our own ("<DB_NAME>_db"): the handlers package runs in
+	// parallel and truncates its own tables — it must never touch ours.
+	dsn, migrateDSN, ok, err := testdb.DSNs("db")
+	if !ok {
 		fmt.Println("DB_HOST not set, skipping DB tests")
 		os.Exit(0)
 	}
+	if err != nil {
+		panic("failed to prepare test DB: " + err.Error())
+	}
 
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host,
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_NAME"),
-	)
+	testDSN, testMigrateDSN = dsn, migrateDSN
 
-	err := InitDB(dsn)
+	err = InitDB(dsn, migrateDSN)
 	if err != nil {
 		panic("failed to init test DB: " + err.Error())
 	}
@@ -87,9 +90,48 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// store is the real Postgres-backed implementation exercised by every test below.
+var store = &PostgresStore{}
+
+// resetTables gives a test that asserts EXACT row counts a clean slate.
+// TestMain truncates only once per process, so without this, `go test -count=N`
+// (or any re-run in the same process) accumulates rows and those tests fail.
+func resetTables(t *testing.T) {
+	t.Helper()
+	if _, err := DB.Exec("TRUNCATE TABLE entries, users RESTART IDENTITY CASCADE"); err != nil {
+		t.Fatalf("reset tables: %v", err)
+	}
+}
+
+// Connection strings built in TestMain, reused by tests that call InitDB again.
+var testDSN, testMigrateDSN string
+
+// InitDB used to log the full DSN — including the database password — at INFO
+// level on every start, so the credential ended up in container logs and any
+// log shipper. It should log only non-secret connection details.
+func TestInitDB_DoesNotLogPassword(t *testing.T) {
+	var logs bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prevLogger)
+
+	prevDB := DB
+	if err := InitDB(testDSN, testMigrateDSN); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	prevDB.Close()
+
+	pw := os.Getenv("DB_PASSWORD")
+	for _, leak := range []string{"password=" + pw, ":" + pw + "@"} {
+		if strings.Contains(logs.String(), leak) {
+			t.Fatalf("database password written to logs (found %q):\n%s", leak, logs.String())
+		}
+	}
+}
+
 func TestInsertEntry(t *testing.T) {
 
-	id, err := InsertEntry(context.Background(), 1, "feeling good", 8, "mood")
+	id, err := store.InsertEntry(context.Background(), 1, "feeling good", 8, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %d", id)
@@ -102,7 +144,7 @@ func TestInsertEntry(t *testing.T) {
 }
 
 func TestGetEntryByID(t *testing.T) {
-	id, err := InsertEntry(context.Background(), 1, "feeling good", 8, "mood")
+	id, err := store.InsertEntry(context.Background(), 1, "feeling good", 8, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %d", id)
@@ -112,7 +154,7 @@ func TestGetEntryByID(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 
-	entry, err := GetEntryByID(context.Background(), int(id), 1)
+	entry, err := store.GetEntryByID(context.Background(), int(id), 1)
 
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
@@ -126,7 +168,7 @@ func TestGetEntryByID(t *testing.T) {
 
 func TestGetEntryByID_NotFound(t *testing.T) {
 
-	entry, err := GetEntryByID(context.Background(), 9999, 1)
+	entry, err := store.GetEntryByID(context.Background(), 9999, 1)
 
 	if err == nil {
 		t.Errorf("expected error for missing entry, got nil")
@@ -139,7 +181,7 @@ func TestGetEntryByID_NotFound(t *testing.T) {
 
 func TestGetAllEntries(t *testing.T) {
 
-	id, err := InsertEntry(context.Background(), 2, "feeling good", 8, "mood")
+	id, err := store.InsertEntry(context.Background(), 2, "feeling good", 8, "mood")
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %d", id)
 	}
@@ -148,7 +190,7 @@ func TestGetAllEntries(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 
-	id, err = InsertEntry(context.Background(), 10, "feeling bad", 5, "mood")
+	id, err = store.InsertEntry(context.Background(), 10, "feeling bad", 5, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %d", id)
@@ -158,7 +200,7 @@ func TestGetAllEntries(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 
-	entry, err := GetAllEntries(context.Background())
+	entry, err := store.GetAllEntries(context.Background())
 
 	if err != nil {
 		t.Errorf("failed to get all entries %v", err)
@@ -171,7 +213,7 @@ func TestGetAllEntries(t *testing.T) {
 
 func TestUpdateEntry(t *testing.T) {
 
-	id, err := InsertEntry(context.Background(), 100, "Feeling good feeling alright", 10, "mood")
+	id, err := store.InsertEntry(context.Background(), 100, "Feeling good feeling alright", 10, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %v", err)
@@ -181,7 +223,7 @@ func TestUpdateEntry(t *testing.T) {
 		t.Errorf("expected nil error on insert, got %v", err)
 	}
 
-	rowsAffected, err := UpdateEntry(context.Background(), int(id), 100, "Not going well", 7, "mood")
+	rowsAffected, err := store.UpdateEntry(context.Background(), int(id), 100, "Not going well", 7, "mood")
 
 	if rowsAffected != 1 {
 		t.Errorf("expected 1 row updated, got %d", rowsAffected)
@@ -195,7 +237,7 @@ func TestUpdateEntry(t *testing.T) {
 
 func TestDeleteEntry(t *testing.T) {
 
-	id, err := InsertEntry(context.Background(), 100, "Feeling good, feeling alright", 10, "mood")
+	id, err := store.InsertEntry(context.Background(), 100, "Feeling good, feeling alright", 10, "mood")
 
 	if id <= 0 {
 		t.Errorf("expected id > 0, got %v", err)
@@ -205,7 +247,7 @@ func TestDeleteEntry(t *testing.T) {
 		t.Errorf("expected nil error on insert, got %v", err)
 	}
 
-	rowAffected, err := DeleteEntry(context.Background(), int(id), 100)
+	rowAffected, err := store.DeleteEntry(context.Background(), int(id), 100)
 
 	if rowAffected != 1 {
 		t.Errorf("expected 1 row updated, got %d", rowAffected)
@@ -220,12 +262,12 @@ func TestDeleteEntry(t *testing.T) {
 func TestGetAllEntriesPaginated(t *testing.T) {
 
 	// Insert 3 entries for userID=1
-	InsertEntry(context.Background(), 1, "entry 1", 5, "mood") //nolint:errcheck
-	InsertEntry(context.Background(), 1, "entry 2", 6, "mood") //nolint:errcheck
-	InsertEntry(context.Background(), 1, "entry 3", 7, "mood") //nolint:errcheck
+	store.InsertEntry(context.Background(), 1, "entry 1", 5, "mood") //nolint:errcheck
+	store.InsertEntry(context.Background(), 1, "entry 2", 6, "mood") //nolint:errcheck
+	store.InsertEntry(context.Background(), 1, "entry 3", 7, "mood") //nolint:errcheck
 
 	// Page 1: limit=2, offset=0 → should return 2 entries
-	entries, err := GetAllEntriesPaginated(context.Background(), 1, 2, 0)
+	entries, err := store.GetAllEntriesPaginated(context.Background(), 1, 2, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -234,7 +276,7 @@ func TestGetAllEntriesPaginated(t *testing.T) {
 	}
 
 	// Page 2: limit=2, offset=2 → should return at least 1 entry
-	entries2, err := GetAllEntriesPaginated(context.Background(), 1, 2, 2)
+	entries2, err := store.GetAllEntriesPaginated(context.Background(), 1, 2, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -245,10 +287,10 @@ func TestGetAllEntriesPaginated(t *testing.T) {
 
 func TestGetEntryCount(t *testing.T) {
 
-	InsertEntry(context.Background(), 200, "test", 5, "mood") //nolint:errcheck
-	InsertEntry(context.Background(), 200, "test", 5, "mood") //nolint:errcheck
+	store.InsertEntry(context.Background(), 200, "test", 5, "mood") //nolint:errcheck
+	store.InsertEntry(context.Background(), 200, "test", 5, "mood") //nolint:errcheck
 
-	count, err := GetEntryCount(context.Background(), 200)
+	count, err := store.GetEntryCount(context.Background(), 200)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -257,7 +299,7 @@ func TestGetEntryCount(t *testing.T) {
 	}
 
 	// userID with no entries should return 0
-	count2, err := GetEntryCount(context.Background(), 9999)
+	count2, err := store.GetEntryCount(context.Background(), 9999)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -268,12 +310,13 @@ func TestGetEntryCount(t *testing.T) {
 }
 
 func TestGetFilteredByCategory(t *testing.T) {
+	resetTables(t)
 
-	InsertEntry(context.Background(), 300, "test", 5, "mood") //nolint:errcheck
-	InsertEntry(context.Background(), 300, "test", 5, "mood") //nolint:errcheck
-	InsertEntry(context.Background(), 300, "test", 5, "work") //nolint:errcheck
+	store.InsertEntry(context.Background(), 300, "test", 5, "mood") //nolint:errcheck
+	store.InsertEntry(context.Background(), 300, "test", 5, "mood") //nolint:errcheck
+	store.InsertEntry(context.Background(), 300, "test", 5, "work") //nolint:errcheck
 
-	entries, err := GetEntriesFiltered(context.Background(), 300, "mood", 0, 10, 0)
+	entries, err := store.GetEntriesFiltered(context.Background(), 300, "mood", 0, 10, 0)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -285,11 +328,12 @@ func TestGetFilteredByCategory(t *testing.T) {
 }
 
 func TestGetFilteredByMoodMin(t *testing.T) {
-	InsertEntry(context.Background(), 400, "low mood", 5, "mood")  //nolint:errcheck
-	InsertEntry(context.Background(), 400, "mid mood", 7, "mood")  //nolint:errcheck
-	InsertEntry(context.Background(), 400, "high mood", 9, "mood") //nolint:errcheck
+	resetTables(t)
+	store.InsertEntry(context.Background(), 400, "low mood", 5, "mood")  //nolint:errcheck
+	store.InsertEntry(context.Background(), 400, "mid mood", 7, "mood")  //nolint:errcheck
+	store.InsertEntry(context.Background(), 400, "high mood", 9, "mood") //nolint:errcheck
 
-	entries, err := GetEntriesFiltered(context.Background(), 400, "", 7, 10, 0)
+	entries, err := store.GetEntriesFiltered(context.Background(), 400, "", 7, 10, 0)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

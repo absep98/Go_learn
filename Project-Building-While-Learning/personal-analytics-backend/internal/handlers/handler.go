@@ -31,4 +31,6 @@ type Cache interface {
 	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
 	Get(ctx context.Context, key string) (string, error)
 	Del(ctx context.Context, key string) error
+	// GetDel atomically reads and deletes key — use it to consume single-use values.
+	GetDel(ctx context.Context, key string) (string, error)
 }

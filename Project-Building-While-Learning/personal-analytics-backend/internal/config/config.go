@@ -37,7 +37,7 @@ type Config struct {
 	// WorkerPoolSize
 	WorkerPoolSize int
 
-	// RequestTimeout - max time a request can take before 504
+	// RequestTimeout - max time a request can take before 503 (http.TimeoutHandler)
 	RequestTimeout time.Duration
 
 	// WebhookURL
@@ -45,6 +45,9 @@ type Config struct {
 
 	// WebhookSecret
 	WebhookSecret string
+
+	// AdminToken guards operator endpoints (/failed-jobs). Empty = those endpoints are disabled.
+	AdminToken string
 }
 
 func Load() (*Config, error) {
@@ -148,5 +151,7 @@ func Load() (*Config, error) {
 
 	WebhookSecret := os.Getenv("WEBHOOK_SECRET")
 	cfg.WebhookSecret = WebhookSecret
+
+	cfg.AdminToken = os.Getenv("ADMIN_TOKEN")
 	return cfg, nil
 }

@@ -91,3 +91,7 @@ func (f *FakeCache) Get(ctx context.Context, key string) (string, error) {
 func (f *FakeCache) Del(ctx context.Context, key string) error {
 	return nil
 }
+
+func (f *FakeCache) GetDel(ctx context.Context, key string) (string, error) {
+	return "", fmt.Errorf("cache miss")
+}

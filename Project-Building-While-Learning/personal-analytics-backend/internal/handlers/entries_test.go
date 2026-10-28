@@ -3,12 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"personal-analytics-backend/internal/db"
 	"personal-analytics-backend/internal/redis"
+	"personal-analytics-backend/internal/testdb"
 	"strings"
 	"testing"
 
@@ -16,22 +16,14 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	host := os.Getenv("DB_HOST")
+	// DB env vars present - set up real DB for integrations tests, in a database
+	// of our own ("<DB_NAME>_handlers") so the parallel db package can't interfere.
+	dsn, migrateDSN, ok, err := testdb.DSNs("handlers")
+	if err != nil {
+		panic("failed to prepare test DB: " + err.Error())
+	}
 
-	if host != "" {
-		// DB env vars present - set up real DB for integrations tests
-		dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-			host,
-			os.Getenv("DB_PORT"),
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_PASSWORD"),
-			os.Getenv("DB_NAME"),
-		)
-
-		migrateDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
-			os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), host, os.Getenv("DB_PORT"), os.Getenv("DB_NAME"),
-		)
-
+	if ok {
 		err := db.InitDB(dsn, migrateDSN)
 		if err != nil {
 			panic("Failed to init test DB : " + err.Error())
@@ -69,7 +61,9 @@ func TestCreateEntry(t *testing.T) {
 	}
 
 	var resp CreateEntryResponse
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 
 	if !resp.Success {
 		t.Errorf("expected success true, got false")

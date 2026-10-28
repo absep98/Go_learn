@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -113,8 +114,7 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// reason to delete as if existing data is there its now stale as we created newly this is called the cache invalidaton.
-	h.Cache.Del(r.Context(), fmt.Sprintf("count:user:%d", userID))
-	h.Cache.Del(r.Context(), fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
+	h.invalidateEntriesCache(r.Context(), userID)
 
 	// Add background job to process this entry (async)
 	// This returns immediately - worker processes it in background
@@ -266,7 +266,9 @@ func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
 
 	if category == "" && moodMin == 0 {
 		if data, err := json.Marshal(responseData); err == nil {
-			h.Cache.Set(r.Context(), cacheKey, string(data), 60*time.Second)
+			if err := h.Cache.Set(r.Context(), cacheKey, string(data), 60*time.Second); err != nil {
+				slog.Warn("Failed to cache entries page", "user_id", userID, "error", err)
+			}
 		}
 	}
 
@@ -277,6 +279,22 @@ func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
 
 // Helper function to send JSON responses
 // "Sends back a JSON response with a specific status code."
+// invalidateEntriesCache drops cached reads for a user after a write.
+// A failed delete is logged, not fatal: the write already succeeded and the
+// stale entry expires with its 60s TTL.
+// Known gap: only page 1 / limit 10 is invalidated — other cached pages stay
+// stale until their TTL. See docs/ENGINEERING-NOTES.md ("Known limitations").
+func (h *Handler) invalidateEntriesCache(ctx context.Context, userID int64) {
+	for _, key := range []string{
+		fmt.Sprintf("count:user:%d", userID),
+		fmt.Sprintf("entries:user:%d:page:1:limit:10", userID),
+	} {
+		if err := h.Cache.Del(ctx, key); err != nil {
+			slog.Warn("Cache invalidation failed", "key", key, "error", err)
+		}
+	}
+}
+
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	// Tell the client the response i'm sending is json
 	w.Header().Set("Content-Type", "application/json")
@@ -351,8 +369,7 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.Cache.Del(r.Context(), fmt.Sprintf("count:user:%d", userID))
-	h.Cache.Del(r.Context(), fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
+	h.invalidateEntriesCache(r.Context(), userID)
 
 	// Success response
 	slog.Info("Entry updated", "entry_id", entryId, "user_id", userID)
@@ -403,8 +420,7 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.Cache.Del(r.Context(), fmt.Sprintf("count:user:%d", userID))
-	h.Cache.Del(r.Context(), fmt.Sprintf("entries:user:%d:page:1:limit:10", userID))
+	h.invalidateEntriesCache(r.Context(), userID)
 
 	worker.AddJob("entry_deleted", map[string]interface{}{
 		"event":     "entry_deleted",

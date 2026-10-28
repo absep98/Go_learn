@@ -3,10 +3,10 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"personal-analytics-backend/internal/models"
-	"encoding/json"
 	// The underscore _ means "blank import"
 	// // You DON'T call any functions from it
 	// So why import it if you don't use it?
@@ -19,10 +19,19 @@ import (
 	// Connection established
 	_ "github.com/lib/pq"
 
+	"embed"
+
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
+
+// Migrations are compiled into the binary so they run the same way from
+// cmd/server, from `go test` in any package directory, and inside the
+// container — no dependency on the process's working directory.
+//
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
 
 // DB is the global database connection
 // It's the middleman between your Go code and the database file.
@@ -52,18 +61,20 @@ func InitDB(dsn string, migrateDSN string) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("Database connected", "path", dsn)
+	// Never log the DSN: it contains the database password. (TestInitDB_DoesNotLogPassword)
+	slog.Info("Database connected")
 
 	return nil
 }
 
 // Run Migrations
 func RunMigrations(dsn string) error {
-	m, err := migrate.New(
-		"file://internal/db/migrations",
-		dsn,
-	)
+	src, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("opening embedded migrations: %w", err)
+	}
 
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
 	if err != nil {
 		return fmt.Errorf("creating migrator: %w", err)
 	}
@@ -354,11 +365,10 @@ func (p *PostgresStore) DeleteEntry(ctx context.Context, entryId int, userID int
 	return rowAffected, nil
 }
 
-
 func InsertFailedJob(job_type string, payload interface{}, errMsg string) error {
 
 	query := `INSERT INTO failed_jobs (job_type, payload, error) VALUES($1, $2, $3) RETURNING id`
-	
+
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -375,7 +385,6 @@ func InsertFailedJob(job_type string, payload interface{}, errMsg string) error 
 	return nil
 }
 
-
 func GetFailedJobs() ([]models.FailedJob, error) {
 
 	query := `SELECT id, job_type, payload, error, created_at FROM failed_jobs ORDER BY created_at DESC`
@@ -390,14 +399,14 @@ func GetFailedJobs() ([]models.FailedJob, error) {
 	failedJobs := make([]models.FailedJob, 0)
 
 	for rows.Next() {
-		var failedJob  models.FailedJob
+		var failedJob models.FailedJob
 
 		err := rows.Scan(&failedJob.ID, &failedJob.JobType, &failedJob.Payload, &failedJob.Error, &failedJob.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
 
-		failedJobs  = append(failedJobs, failedJob)
+		failedJobs = append(failedJobs, failedJob)
 	}
 	return failedJobs, nil
 }

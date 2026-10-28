@@ -1,6 +1,5 @@
 package main
 
-// C:\Users\absep\OneDrive\Documents\new keys>ssh -i ssh-key-2026-04-22.key ubuntu@140.245.202.129
 import (
 	"context"
 	"fmt"
@@ -137,17 +136,18 @@ func main() {
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(handlers.LoggingMiddleware(
 			h.AuthMiddleware(
 				handlers.UserRateLimitMiddleware(func(w http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodPost {
+					switch r.Method {
+					case http.MethodPost:
 						h.CreateEntry(w, r)
-					} else if r.Method == http.MethodGet {
+					case http.MethodGet:
 						h.GetEntries(w, r)
-					} else if r.Method == http.MethodPatch {
+					case http.MethodPatch:
 						// PATCH /entries?id=5 - Update an entry
 						h.UpdateEntry(w, r)
-					} else if r.Method == http.MethodDelete {
+					case http.MethodDelete:
 						// Delete /entries?id=5 - Delete an entry
 						h.DeleteEntry(w, r)
-					} else {
+					default:
 						http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 					}
 				}))))))))
@@ -160,9 +160,11 @@ func main() {
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
 			handlers.LoggingMiddleware(handlers.GetMetrics))))))
 
+	// Operator-only: dead-letter payloads contain users' entry text.
+	// Requires X-Admin-Token == ADMIN_TOKEN; disabled (404) when ADMIN_TOKEN is unset.
 	http.HandleFunc("/failed-jobs", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
-			handlers.LoggingMiddleware(handlers.GetFailedJobs))))))
+			handlers.LoggingMiddleware(handlers.AdminOnly(cfg.AdminToken, handlers.GetFailedJobs)))))))
 
 	http.HandleFunc("/logout", handlers.RequestIDMiddleware(
 		handlers.TimeoutMiddleware(handlers.MetricsMiddleware(handlers.RateLimitMiddleware(
@@ -174,9 +176,8 @@ func main() {
 
 	// STEP 1: Create HTTP server (instead of just ListenAndServe)
 	// Why? So we can call server.Shutdown() later
-	server := &http.Server{
-		Addr: ":" + cfg.Port,
-	}
+	// Timeouts are set in newHTTPServer (server.go) — a bare http.Server has none.
+	server := newHTTPServer(":"+cfg.Port, http.DefaultServeMux, cfg.RequestTimeout)
 
 	// STEP 2: Start server in a GOROUTINE (background)
 	// Why? So main() doesn't block here and can listen for Ctrl+C
@@ -194,7 +195,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 
 	// STEP 4: Tell Go: "When Ctrl+C (SIGINT) or kill (SIGTERM) happens, send it to 'quit' channel"
-	signal.Notify(quit, os.Interrupt) // os.Interrupt = Ctrl+C
+	signal.Notify(quit, shutdownSignals...) // Ctrl+C and SIGTERM (docker stop / Kubernetes)
 
 	// STEP 5: BLOCK HERE until a signal is received
 	// This line waits forever until Ctrl+C is pressed

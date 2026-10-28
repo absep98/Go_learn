@@ -1,0 +1,17 @@
+# Local demo / dev overlay — runs the API, Postgres and Redis only (no nginx/certbot)
+# and publishes the API on http://localhost:8080.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d app
+#   bash scripts/demo.sh
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+services:
+  app:
+    ports:
+      - "8080:8080"
+    environment:
+      # Nothing listens here, so every webhook fails → retry → circuit breaker →
+      # dead-letter queue. Makes the failure path observable in the demo.
+      - WEBHOOK_URL=http://127.0.0.1:9/unreachable
+      # Operator token for /failed-jobs. Dev value only — set a real secret in production.
+      - ADMIN_TOKEN=dev-admin-token
+      - LOG_LEVEL=INFO

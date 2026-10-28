@@ -1,6 +1,14 @@
-run:
-  build-tags: []
+# golangci-lint v2 config. CI pins the exact linter version (see .github/workflows/ci.yml)
+# so a new upstream release can't turn the build red on its own.
+version: "2"
 
-issues:
-  exclude-dirs:
-    - learning-demos
+linters:
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - learning-demos
+      - test-endpoints

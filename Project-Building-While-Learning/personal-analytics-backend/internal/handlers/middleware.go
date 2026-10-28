@@ -87,13 +87,13 @@ func (h *Handler) validateToken(tokenString string) (jwt.MapClaims, error) {
 
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return nil, fmt.Errorf("Token has expired %w", err)
+			return nil, fmt.Errorf("token has expired: %w", err)
 		}
 		if errors.Is(err, jwt.ErrSignatureInvalid) {
-			return nil, fmt.Errorf("Invalid token signature %w", err)
+			return nil, fmt.Errorf("invalid token signature: %w", err)
 		}
 		if errors.Is(err, jwt.ErrTokenMalformed) {
-			return nil, fmt.Errorf("Malformed token %w", err)
+			return nil, fmt.Errorf("malformed token: %w", err)
 		}
 	}
 

@@ -58,3 +58,9 @@ func (r *RedisCache) Get(ctx context.Context, key string) (string, error) {
 func (r *RedisCache) Del(ctx context.Context, key string) error {
 	return r.client.Del(ctx, key).Err()
 }
+
+// GetDel reads and deletes a key in one atomic command (Redis >= 6.2).
+// Used for single-use tokens: of N concurrent callers, exactly one gets the value.
+func (r *RedisCache) GetDel(ctx context.Context, key string) (string, error) {
+	return r.client.GetDel(ctx, key).Result()
+}

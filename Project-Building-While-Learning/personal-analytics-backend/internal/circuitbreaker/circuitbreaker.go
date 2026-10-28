@@ -44,7 +44,7 @@ With circuit breaker (Redis is down):
 */
 
 import (
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 )
@@ -58,7 +58,12 @@ type CircuitBreaker struct {
 	threshold       int           // how many consecutive failures before opening
 	cooldown        time.Duration // how long to wait in OPEN state before testing
 	mu              sync.Mutex    // protects all fields — multiple goroutines may call Execute()
+	generation      uint64        // bumped on every state change; results from an older generation are ignored
 }
+
+// ErrOpen is returned without calling the operation while the breaker is open
+// (or while a half-open trial call is already in flight).
+var ErrOpen = errors.New("circuit breaker is open")
 
 // NewCircuitBreaker creates a new breaker.
 // threshold: number of consecutive failures before tripping (e.g. 5)
@@ -81,66 +86,81 @@ func NewCircuitBreaker(threshold int, cooldown time.Duration) *CircuitBreaker {
 // increment failureCount simultaneously — leading to wrong counts (race condition).
 // The mutex ensures only ONE goroutine reads and updates state at a time.
 // The circuit breaker is generic — it works for any operation that can succeed or fail. The caller decides what the operation is.
+//
+// FIX: the first version held the mutex for the whole call, INCLUDING operation().
+// For webhooks that is retry.Do (500ms + 1s of backoff sleeps) plus an HTTP POST,
+// and all workers share one breaker — so the worker pool could only send one
+// webhook at a time. Now the lock covers only the state check before the call
+// and the state update after it; operation() runs unlocked and concurrently.
+// See concurrency_test.go.
 func (cb *CircuitBreaker) Execute(operation func() error) error {
+	gen, err := cb.beforeCall()
+	if err != nil {
+		return err
+	}
 
+	err = operation() // NOT holding cb.mu — independent calls run in parallel
+
+	cb.afterCall(gen, err)
+	return err
+}
+
+// beforeCall decides, under the lock, whether this call may go through.
+func (cb *CircuitBreaker) beforeCall() (uint64, error) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
 	switch cb.state {
-	case "closed":
-		err := operation()
-		if err != nil {
-			cb.failureCount++
-			cb.lastFailureTime = time.Now()
-
-			// Too many consecutive failures? Trip the breaker!
-			if cb.failureCount >= cb.threshold {
-				cb.state = "open"
-			}
-			return err
-		}
-		// Success — reset counter (we care about CONSECUTIVE failures, not total)
-		cb.failureCount = 0
-		return nil
-
 	case "open":
-		// Why check time.Since(lastFailureTime)?
 		// We don't want to stay OPEN forever — the service might have recovered.
-		// We wait for `cooldown` duration after the LAST failure, then test once.
-		// time.Since() returns how much time has passed since lastFailureTime.
-		// If that duration exceeds cooldown, enough time has passed to try again.
-		if time.Since(cb.lastFailureTime) > cb.cooldown {
-			cb.state = "half-open"
-			// Test one request — same logic as half-open
-			err := operation()
-			if err != nil {
-				// Still failing — reset cooldown timer and stay OPEN
-				cb.state = "open"
-				cb.lastFailureTime = time.Now()
-				return err
-			}
-			// Recovered! Back to normal operation
-			cb.state = "closed"
-			cb.failureCount = 0
-			return nil
+		// We wait for `cooldown` after the LAST failure, then let ONE call test it.
+		if time.Since(cb.lastFailureTime) <= cb.cooldown {
+			return 0, ErrOpen // cooldown not yet passed — reject without calling the service
 		}
-		// Cooldown not yet passed — reject immediately without calling service
-		return fmt.Errorf("circuit breaker is open")
+		cb.setState("half-open") // this caller is the single trial
+		return cb.generation, nil
 
 	case "half-open":
-		// This case is reached only if Execute() is somehow called when state
-		// is already half-open (shouldn't happen given our locking, but defensive)
-		err := operation()
-		if err != nil {
-			cb.state = "open"
-			cb.lastFailureTime = time.Now()
-			return err
-		}
-		cb.state = "closed"
-		cb.failureCount = 0
-		return nil
+		// A trial is already in flight. Reject instead of queueing behind it.
+		return 0, ErrOpen
 	}
-	return nil
+	return cb.generation, nil // closed
+}
+
+// afterCall records the outcome, under the lock.
+func (cb *CircuitBreaker) afterCall(gen uint64, err error) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	// The state changed while this call was in flight (e.g. other calls tripped
+	// the breaker). A stale result must not re-close or re-open it.
+	if gen != cb.generation {
+		return
+	}
+
+	if err != nil {
+		cb.lastFailureTime = time.Now()
+		if cb.state == "half-open" {
+			cb.setState("open") // trial failed — still down, start another cooldown
+			return
+		}
+		cb.failureCount++
+		if cb.failureCount >= cb.threshold {
+			cb.setState("open") // too many consecutive failures — trip the breaker
+		}
+		return
+	}
+
+	// Success — reset counter (we care about CONSECUTIVE failures, not total)
+	if cb.state == "half-open" {
+		cb.setState("closed") // trial succeeded — recovered
+	}
+	cb.failureCount = 0
+}
+
+func (cb *CircuitBreaker) setState(s string) {
+	cb.state = s
+	cb.generation++
 }
 
 /*

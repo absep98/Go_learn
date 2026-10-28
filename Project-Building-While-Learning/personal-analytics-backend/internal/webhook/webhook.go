@@ -31,7 +31,7 @@ func (h HTTPSender) Send(url string, payload interface{}) error {
 	req, err := http.NewRequest("POST", url, body)
 
 	if err != nil {
-		return fmt.Errorf("Failed to create the signature")
+		return fmt.Errorf("failed to create webhook request: %w", err)
 	}
 	req.Header.Set("X-Webhook-Signature", encodedString)
 

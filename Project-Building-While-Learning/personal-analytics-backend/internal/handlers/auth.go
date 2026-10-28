@@ -264,8 +264,12 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Consume the refresh token with ONE atomic read-and-delete (Redis GETDEL).
+	// The old Get-then-Del let N concurrent replays of the same token all pass
+	// the Get before any Del ran, so a stolen token could mint N sessions.
+	// See refresh_test.go.
 	key := "refresh_token:" + req.RefreshToken
-	val, err := h.Cache.Get(r.Context(), key)
+	val, err := h.Cache.GetDel(r.Context(), key)
 
 	if err != nil {
 		errorResponse(w, http.StatusUnauthorized, "Invalid or expired refresh token")
@@ -277,7 +281,6 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Invalid session data")
 		return
 	}
-	h.Cache.Del(r.Context(), key)
 
 	// Generate JWT token
 	// signing token and covert to string
@@ -328,20 +331,15 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same atomic consume as Refresh: one GETDEL both checks and revokes the token.
 	key := "refresh_token:" + req.RefreshToken
-	val, err := h.Cache.Get(r.Context(), key)
+	val, err := h.Cache.GetDel(r.Context(), key)
 
-	if err != nil {
+	if err != nil || val == "" {
 		errorResponse(w, http.StatusUnauthorized, "Invalid or expired refresh token")
 		return
 	}
 
-	if val == "" {
-		errorResponse(w, http.StatusUnauthorized, "Invalid or expired refresh token")
-		return
-	}
-
-	h.Cache.Del(r.Context(), key)
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "Logged out successfully",

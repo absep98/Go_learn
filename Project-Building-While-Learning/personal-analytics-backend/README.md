@@ -1,538 +1,162 @@
 # Personal Analytics Backend
 
-A production-ready Go backend with JWT authentication, protected API endpoints, database persistence, and comprehensive testing.
+A Go HTTP API for a personal journaling/analytics app: users register, log mood entries, and
+read them back paginated and filtered. Every write also fires a signed webhook in the background.
 
-## Why This Exists
+The point of the project is the backend engineering around that small domain: stateless auth
+with rotating refresh tokens, Postgres with versioned migrations, Redis for caching and rate
+limiting, a bounded worker pool with retries, a circuit breaker and a dead-letter queue, and the
+tests that prove those pieces behave under concurrency and failure.
 
-This service is the backend engine for a personal analytics platform. Instead of building yet another TODO app, this focuses on real backend problems: authentication, data persistence, security, and scalability—the kind of work that companies actually pay for.
-
-## Tech Stack
-
-- **Language:** Go 1.25.3
-- **Database:** SQLite (modernc.org/sqlite)
-- **Authentication:** JWT tokens (github.com/golang-jwt/jwt/v5)
-- **Security:** bcrypt password hashing
-- **Testing:** PowerShell test scripts
-
-## What I Built
-
-### Week 1 (Jan 2-7): Foundation
-
-- HTTP server with `net/http` standard library
-- SQLite database connection and schema design
-- Environment-based configuration
-- CRUD operations (POST/GET /entries)
-- Input validation and error handling
-- SQL injection prevention
-- Request logging middleware
-
-### Week 2 (Jan 8-12): Authentication System
-
-- User registration with email validation
-- bcrypt password hashing (never store plain text)
-- JWT token generation on login
-- Authentication middleware for protected routes
-- User-specific data isolation
-- Comprehensive test suite (18 tests)
-- Error message improvements
-
-## Authentication Flow
-
-```
-1. REGISTRATION
-   User → POST /register {email, password}
-        → Validate email format (@ required)
-        → Hash password with bcrypt
-        → Save to database
-        → Return success + user_id
-
-2. LOGIN
-   User → POST /login {email, password}
-        → Get user from database
-        → Compare password with hash (bcrypt)
-        → Generate JWT token (includes user_id)
-        → Return token
-
-3. ACCESSING PROTECTED ROUTES
-   User → GET/POST /entries (Header: Authorization: Bearer <token>)
-        → Middleware checks token
-        → Verify signature with JWT_SECRET
-        → Extract user_id from token
-        → Pass to handler in context
-        → Handler uses authenticated user_id
-        → Return user-specific data
-```
-
-**Key Security Points:**
-
-- Passwords never stored in plain text (bcrypt hashing)
-- JWT tokens signed with secret (tamper-proof)
-- User_id from verified token only (no client manipulation)
-- Each user only sees their own entries
-
-## What I Built (Week 1)
-
-### Days 1-2: Foundation
-
-- HTTP server with `net/http` standard library
-- SQLite database connection and schema design
-- Environment-based configuration
-- Clean project structure (`cmd/` and `internal/` separation)
-
-### Days 3-4: Core Features
-
-- **POST /entries** - Create mood/activity entries with full validation
-- **GET /entries** - Retrieve all entries as structured JSON
-- Input validation: userID, text length, mood range (1-10), category
-- Database persistence with parameterized queries (SQL injection safe)
-
-### Days 5-6: Security & Consolidation
-
-- Learned SQL injection prevention (parameterized vs string concatenation)
-- Mastered JSON struct tags for API mapping
-- Implemented consistent error response patterns
-- Added request logging for debugging
-- Code review and cleanup
+> **Status (Oct 2026):** single-instance service, built and run locally with Docker Compose.
+> The suite runs with Go's race detector against real Postgres 16 and Redis 7.
+> It is a portfolio project, not a system with production traffic.
+> [docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) records the defects found and fixed,
+> with before/after evidence, and lists what is still weak.
 
 ## Architecture
 
-```
-User Request
-    ↓
-main.go - Route Registration
-    ↓
-LoggingMiddleware (logs all requests)
-    ↓
-AuthMiddleware (for protected routes)
-    - Verify JWT token
-    - Extract user_id
-    - Put in context
-    ↓
-Handler Layer (internal/handlers/)
-    - HTTP method validation
-    - JSON parsing with struct tags
-    - Input validation (sequential checks)
-    - Get user_id from context (protected routes)
-    ↓
-Database Layer (internal/db/)
-    - Parameterized SQL queries (SQL injection safe)
-    - CRUD operations
-    ↓
-SQLite Storage (data.db)
-    - users table (email, password_hash)
-    - entries table (user_id, text, mood, category)
+```mermaid
+flowchart LR
+    C[Client] -->|HTTPS| N[nginx<br/>TLS termination]
+    N --> S
+
+    subgraph S[Go server: net/http]
+        direction TB
+        T["http.Server<br/>header/read/write/idle timeouts"] --> MW
+        MW["RequestID → Timeout (503) → Metrics →<br/>IP rate limit → Logging"] --> A{protected?}
+        A -->|/entries| J["JWT auth → per-user rate limit"] --> H[Handlers]
+        A -->|/failed-jobs| AD["AdminOnly (X-Admin-Token)"] --> H
+        A -->|public| H
+    end
+
+    H -->|SQL, parameterised| PG[(Postgres<br/>users · entries · failed_jobs)]
+    H -->|"cache-aside reads (60s TTL)<br/>refresh tokens (GETDEL)<br/>rate-limit counters"| R[(Redis)]
+    H -->|AddJob, non-blocking| Q[[Buffered queue · 100]]
+    Q --> W["Worker pool (3)"]
+    W -->|"circuit breaker → retry ×3 w/ backoff<br/>HMAC-SHA256 signed POST"| WH[Webhook receiver]
+    W -->|retries exhausted| PG
 ```
 
-## API Endpoints
+**Write path (`POST /entries`):** auth → validate → insert in Postgres → invalidate cached pages →
+enqueue a webhook job (non-blocking; if the queue is full the job is dropped and logged) → `201`.
+A worker sends the job through a circuit breaker and retry loop. A job that still fails is stored in
+`failed_jobs`, where an operator can read it via `/failed-jobs`.
 
-See [API-ENDPOINTS.md](API-ENDPOINTS.md) for detailed documentation.
+**Auth:** login returns a 15-minute HS256 access JWT plus an opaque refresh token stored in Redis
+for 7 days. `/refresh` consumes that token with one atomic `GETDEL` and issues a new pair, so a
+replayed or stolen refresh token works at most once.
 
-### Public Endpoints (No Authentication)
+**Shutdown (SIGINT/SIGTERM):** the server stops accepting connections and drains in-flight requests
+(5s budget). The worker pool then stops accepting jobs and finishes every job it already accepted.
+Redis and Postgres close last.
 
-**POST /register** - Create new user account
-**POST /login** - Get JWT token
+## API
 
-### Protected Endpoints (Requires JWT Token)
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/health` | — | Pings Postgres + Redis; `503` if either is down |
+| GET | `/ping` | — | Liveness |
+| POST | `/register` | — | `{email, password}`; bcrypt hash; `409` on duplicate email |
+| POST | `/login` | — | Returns `access_token` (15 min) + `refresh_token` (7 days) |
+| POST | `/refresh` | refresh token | Rotates: old token is consumed, new pair issued |
+| POST | `/logout` | refresh token | Revokes the refresh token |
+| GET | `/entries` | Bearer JWT | `page`, `limit` (≤100), `category`, `mood_min`; per-user isolation |
+| POST | `/entries` | Bearer JWT | `{text, mood 1–10, category}` |
+| PATCH / DELETE | `/entries?id=N` | Bearer JWT | `404` if the entry isn't the caller's |
+| GET | `/metrics` | — | Per-path request counts, errors, latency (JSON) |
+| GET | `/failed-jobs` | `X-Admin-Token` | Dead-letter queue; disabled (`404`) unless `ADMIN_TOKEN` is set |
 
-**GET /entries** - Retrieve user's entries
-**POST /entries** - Create new entry
+## Run it
 
-### Utility Endpoints
-
-**GET /health** - Health check
-**GET /ping** - Connection test
-
-## Quick Start
-
-### Prerequisites
-
-- Go 1.25.3 or higher
-- Git
-
-### Installation
+Requirements: Docker. Go 1.25+ only if you want to run tests outside Docker.
 
 ```bash
-# Clone repository
-git clone https://github.com/absep98/Go_learn.git
-cd Go_learn/Project-Building-While-Learning/personal-analytics-backend
-
-# Install dependencies
-go mod download
-
-# Set environment variables (Windows PowerShell)
-$env:JWT_SECRET = "your-secret-key-here"
-$env:PORT = "8080"
-$env:DB_PATH = "./data.db"
-
-# Or create .env file
-# JWT_SECRET=your-secret-key-here
-# PORT=8080
-# DB_PATH=./data.db
-
-# Run server
-go run .\cmd\server\main.go
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d app
+bash scripts/demo.sh        # 8-step walkthrough with curl
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
 ```
 
-Server will start on `http://localhost:8080`
-
-### Running Tests
-
-```powershell
-# Terminal 1: Start server
-go run .\cmd\server\main.go
-
-# Terminal 2: Run all tests
-.\test-all.ps1
-
-# Or run individual test suites
-.\test-register.ps1
-.\test-login.ps1
-.\test-middleware.ps1
-```
-
-## Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| JWT_SECRET | Yes | - | Secret key for signing JWT tokens |
-| PORT | No | 8080 | Server port |
-| DB_PATH | No | ./data.db | SQLite database file path |
-
-## Usage Examples
-
-### 1. Register a New User
-
-```powershell
-$body = @{
-    email = "user@example.com"
-    password = "password123"
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri http://localhost:8080/register -Method Post -Body $body -ContentType "application/json"
-```
-
-### 2. Login and Get Token
-
-```powershell
-$body = @{
-    email = "user@example.com"
-    password = "password123"
-} | ConvertTo-Json
-
-$response = Invoke-RestMethod -Uri http://localhost:8080/login -Method Post -Body $body -ContentType "application/json"
-$token = $response.token
-```
-
-### 3. Create Entry (with token)
-
-```powershell
-$headers = @{
-    "Authorization" = "Bearer $token"
-}
-
-$body = @{
-    text = "Had a great day!"
-    mood = 8
-    category = "personal"
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri http://localhost:8080/entries -Method Post -Headers $headers -Body $body -ContentType "application/json"
-```
-
-### 4. Get Entries (with token)
-
-```powershell
-$headers = @{
-    "Authorization" = "Bearer $token"
-}
-
-Invoke-RestMethod -Uri http://localhost:8080/entries -Method Get -Headers $headers
-```
-
-## Project Structure
-
-```
-personal-analytics-backend/
-├── cmd/
-│   └── server/
-│       └── main.go              # Entry point, route registration
-├── internal/
-│   ├── handlers/
-│   │   ├── auth.go              # Register/Login handlers
-│   │   ├── entries.go           # CRUD operations for entries
-│   │   ├── health.go            # Health check
-│   │   ├── middleware.go        # JWT authentication middleware
-│   │   └── loggingMiddleware.go # Request logging
-│   ├── db/
-│   │   └── db.go                # Database layer (SQLite)
-│   └── models/                  # (Future: data models)
-├── learning-demos/
-│   ├── 01-sql-injection-demo.go # Security demo
-│   └── 02-json-struct-tags-practice.go # JSON mapping practice
-├── test-all.ps1                 # Comprehensive test script
-├── test-register.ps1            # Registration tests
-├── test-login.ps1               # Login tests
-├── test-middleware.ps1          # Auth middleware tests
-├── ARCHITECTURE-MAP.md          # Visual architecture guide
-├── CHEAT-SHEET.md               # Quick syntax reference
-├── TESTING.md                   # Test documentation
-├── README.md                    # This file
-├── .env                         # Environment variables (not in git)
-├── data.db                      # SQLite database (not in git)
-└── go.mod                       # Go dependencies
-```
-
-## Database Schema
-
-### users table
-
-```sql
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-```
-
-### entries table
-
-```sql
-CREATE TABLE entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    mood INTEGER NOT NULL,
-    category TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-)
-```
-
-## Testing
-
-**Test Coverage:** 18 comprehensive tests
-
-- Registration validation (4 tests)
-- Login authentication (4 tests)
-- Middleware protection (3 tests)
-- Entry CRUD operations (4 tests)
-- Data isolation (3 tests)
-
-See [TESTING.md](TESTING.md) for detailed test results.
-
-**All tests passing ✅**
-
-## What I Learned
-
-### Week 1
-
-- Go HTTP server fundamentals
-- Database design and SQLite integration
-- JSON struct tags and API design
-- SQL injection prevention (parameterized queries)
-- Input validation patterns
-- Error handling best practices
-
-### Week 2
-
-- JWT token generation and verification
-- bcrypt password hashing
-- Middleware pattern for authentication
-- Context for passing data between middleware and handlers
-- User data isolation
-- Comprehensive testing strategies
-- Better error messages for debugging
-
-## Next Steps (Week 3)
-
-- Implement UPDATE and DELETE operations
-- Add pagination for GET /entries
-- Caching layer for improved performance
-- Rate limiting
-- Background job processing (async)
-- Metrics and monitoring
-
-## Why This Matters for Interviews
-
-This project demonstrates:
-
-- ✅ **Authentication systems** - JWT, bcrypt, middleware
-- ✅ **Security awareness** - SQL injection prevention, password hashing
-- ✅ **API design** - RESTful endpoints, proper status codes
-- ✅ **Database design** - Schema, relationships, queries
-- ✅ **Testing** - Comprehensive test coverage
-- ✅ **Clean architecture** - Separation of concerns, middleware pattern
-- ✅ **Production readiness** - Logging, error handling, validation
-
-## Resources
-
-- [ARCHITECTURE-MAP.md](ARCHITECTURE-MAP.md) - Visual guide to how everything connects
-- [CHEAT-SHEET.md](CHEAT-SHEET.md) - Quick reference for common patterns
-- [API-ENDPOINTS.md](API-ENDPOINTS.md) - Detailed endpoint documentation
-- [TESTING.md](TESTING.md) - Test results and coverage
-- [Week1-Review.md](Week1-Review.md) - Week 1 learning reflection
-
-## License
-
-This is a learning project. Feel free to use as reference!
-
-## Contact
-
-GitHub: [@absep98](https://github.com/absep98)
-
-}
-
-```
-
-**Validation Rules:**
-- `user_id` must be > 0
-- `text` cannot be empty
-- `mood` must be 1-10
-- `category` cannot be empty
-
-### GET /entries
-Retrieves all entries ordered by creation time.
-
-**Response (200 OK):**
-```json
-{
-  "success": true,
-  "count": 2,
-  "entries": [
-    {
-      "id": 2,
-      "user_id": 101,
-      "text": "Productive day!",
-      "mood": 8,
-      "category": "work",
-      "created_at": "2026-01-07T10:30:00Z"
-    },
-    {
-      "id": 1,
-      "user_id": 101,
-      "text": "Morning workout",
-      "mood": 9,
-      "category": "health",
-      "created_at": "2026-01-07T07:00:00Z"
-    }
-  ]
-}
-```
-
-## What I Learned
-
-### 1. 3-Layer Architecture
-
-Separation between handlers (HTTP logic), database layer (queries), and storage (SQLite). This makes code testable, maintainable, and easier to modify.
-
-### 2. JSON Struct Tags
-
-Tags like `json:"user_id"` map between JSON keys (snake_case) and Go fields (PascalCase). Without tags, Go can't match `{"user_id": 101}` to `UserID int`.
-
-### 3. SQL Injection Prevention
-
-**Safe:** `db.Exec("INSERT INTO ... VALUES (?, ?, ?)", val1, val2, val3)`
-**Vulnerable:** `db.Exec(fmt.Sprintf("INSERT INTO ... VALUES ('%s')", userInput))`
-
-Parameterized queries prevent attackers from injecting malicious SQL.
-
-### 4. Go Patterns
-
-- Multiple return values for error handling: `result, err := function()`
-- `defer` for cleanup: `defer rows.Close()`
-- Early returns for validation: `if invalid { return error }`
-
-## Tech Stack
-
-- **Language:** Go 1.25.3
-- **Database:** SQLite (modernc.org/sqlite driver)
-- **Libraries:** `net/http`, `encoding/json`, `godotenv`
-- **Tools:** PowerShell for testing, Git for version control
-
-## Project Structure
-
-```
-personal-analytics-backend/
-├── cmd/
-│   └── server/
-│       └── main.go              # Entry point, route registration
-├── internal/
-│   ├── handlers/
-│   │   └── entries.go          # HTTP handlers, validation
-│   ├── db/
-│   │   └── db.go               # Database connection, CRUD
-│   └── models/
-│       └── entry.go            # Data models (planned for Week 2)
-├── learning-demos/
-│   ├── 01-sql-injection-demo.go    # Security education
-│   └── 02-json-struct-tags-practice.go
-├── .env                        # Environment variables
-├── data.db                     # SQLite database file
-└── README.md
-```
-
-## How to Run
+The dev overlay starts only the API, Postgres and Redis (no nginx/certbot) and publishes
+`localhost:8080`. It also points `WEBHOOK_URL` at a closed port on purpose, so the demo exercises
+the retry → circuit breaker → dead-letter path.
+
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `JWT_SECRET` | — (required) | HS256 signing key |
+| `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` `DB_NAME` | `localhost` `5432` `user` `password` `analytics` | Postgres |
+| `REDIS_HOST` `REDIS_PORT` | `localhost` `6379` | Redis (≥ 6.2 for `GETDEL`) |
+| `ADMIN_TOKEN` | empty → `/failed-jobs` disabled | Operator token |
+| `REQUEST_TIMEOUT` | `10` (s) | Per-request deadline → `503` |
+| `SHUTDOWN_TIMEOUT` | `5` (s) | Drain budget for in-flight requests |
+| `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW` | `100` / `60` (s) | Per-IP fixed window |
+| `WORKERPOOL_SIZE` | `3` | Webhook workers |
+| `WEBHOOK_URL` / `WEBHOOK_SECRET` | empty | Target and HMAC key for `X-Webhook-Signature` |
+| `LOG_LEVEL` | `DEBUG` | `slog` JSON logs |
+
+## Tests
 
 ```bash
-# Install dependencies
-go mod tidy
-
-# Start the server
-go run cmd/server/main.go
-
-# Server starts on http://localhost:8080
+bash scripts/test-integration.sh   # vet + full suite with -race against real Postgres 16 + Redis 7, all in Docker
+go test ./cmd/... ./internal/...   # unit tests only; DB/Redis tests skip when DB_HOST / REDIS_ADDR are unset
 ```
 
-## Testing
+Last full run (2026-10-29, `golang:1.25` container): **78 tests passed, 0 failed, 0 data races**,
+stable across `-count=3`. `go vet` is clean, and `golangci-lint v2.5.0` reports 0 issues.
 
-```powershell
-# Test POST endpoint
-$body = @{
-    user_id = 101
-    text = "Great day!"
-    mood = 9
-    category = "personal"
-} | ConvertTo-Json
+What the tests cover, beyond CRUD and validation:
 
-Invoke-RestMethod -Uri http://localhost:8080/entries -Method Post -Body $body -ContentType "application/json"
+| Property | Test |
+|---|---|
+| A handler that outlives its deadline can't write to the client; a handler panic is recoverable | `internal/handlers/timeout_test.go` |
+| A refresh token is accepted once under 10 concurrent replays; it's revoked on rotation and on logout | `internal/handlers/refresh_test.go` |
+| `GETDEL` gives exactly one winner among 50 concurrent consumers (real Redis) | `internal/redis/redis_test.go` |
+| Shutdown processes every accepted job; enqueue during or after shutdown never panics | `internal/worker/worker_test.go` |
+| Circuit breaker lets independent calls run concurrently; half-open admits exactly one trial | `internal/circuitbreaker/concurrency_test.go` |
+| `/failed-jobs` rejects missing/wrong tokens and is off by default | `internal/handlers/admin_test.go` |
+| The DB password never reaches logs; migrations run from any working directory | `internal/db/db_test.go` |
+| Server timeouts are set; SIGTERM triggers graceful shutdown | `cmd/server/server_test.go` |
 
-# Test GET endpoint
-Invoke-RestMethod -Uri http://localhost:8080/entries
+Statement coverage by package (2026-10-29): retry 100%, circuitbreaker 91.2%, config 89.7%, webhook 85.0%,
+worker 69.4%, db 57.6%, handlers 57.0%, redis 12.5%, cmd/server 1.6%. Each test package that needs
+Postgres gets its own database (`internal/testdb`), so packages can run in parallel safely.
+
+## Engineering decisions (short version)
+
+- **`http.TimeoutHandler` instead of a hand-rolled timeout goroutine.** The original version raced
+  on the `ResponseWriter` and let a panic crash the process. The stdlib wrapper buffers output under a
+  mutex. The cost is a `503` instead of a `504`, and no streaming responses behind it.
+- **`GETDEL` for refresh tokens.** One atomic Redis command instead of `GET` + `DEL`. Simpler than
+  a Lua script or `WATCH`/`MULTI` and sufficient for a single-key consume. Requires Redis 6.2+.
+- **Circuit breaker locks only around state transitions, not around the call.** The original held its
+  mutex through the retry/backoff and HTTP call, so the three webhook workers sent one at a time.
+  A generation counter stops a slow, stale result from flipping the state.
+- **Worker pool:** the `WaitGroup` counts workers, not jobs, and an `RWMutex` guards close-vs-send.
+  Handlers enqueue concurrently under the read lock; shutdown closes the queue under the write lock.
+- **Migrations embedded with `go:embed`.** The binary works the same from tests, the CLI, and the container.
+- **Lint version pinned** (`v2.5.0`): CI can no longer turn red because an upstream release changed.
+
+Full write-up with root causes, evidence and alternatives: [docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md).
+
+## Known limitations
+
+Listed with impact and proposed fixes in [docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md#known-limitations):
+cache invalidation covers only page 1; behind nginx every client shares one rate-limit bucket;
+login response time reveals whether an email exists; no request-body size limit; jobs in the
+in-memory queue are lost if the process crashes; no index on `entries(user_id, created_at)`.
+
+## Repository layout
+
 ```
-
-## Roadmap
-
-**Week 2 (Jan 8-14):** Authentication & Authorization
-
-- JWT token generation and validation
-- User-specific data isolation
-- Protected routes with middleware
-
-**Week 3 (Jan 15-21):** Concurrency & Background Processing
-
-- Goroutines for async tasks
-- Worker pools with channels
-- AI summary generation (mock or real)
-
-**Week 4 (Jan 22-28):** Scaling & Production Readiness
-
-- Caching layer (in-memory or Redis)
-- Rate limiting
-- Metrics and monitoring
-- Clean documentation and diagrams
-
-## Interview-Ready Stories
-
-**"Tell me about a backend project you built"**
-> "I built a Go REST API with CRUD operations, database persistence, and security best practices. It handles entry creation with validation, uses parameterized queries to prevent SQL injection, and follows a 3-layer architecture for separation of concerns."
-
-**"How do you prevent SQL injection?"**
-> "I use parameterized queries with placeholders. Instead of concatenating user input into SQL strings, I pass values separately so the database driver handles escaping automatically."
-
-**"What's the benefit of separating handlers and database logic?"**
-> "Testability, reusability, and maintainability. I can test handlers without a real database, reuse database functions across different interfaces, and switching databases only requires changing one layer."
-
----
-
-**Built during Week 1 (Jan 2-7, 2026) as part of transitioning from SDET to Backend Developer.**
+cmd/server/          main.go (wiring, routes, shutdown) · server.go (http.Server config)
+internal/handlers/   HTTP handlers + middleware (auth, admin, rate limit, timeout, metrics, request id)
+internal/db/         Postgres store, embedded migrations
+internal/redis/      Redis client + cache adapter
+internal/worker/     bounded worker pool, dead-letter handoff
+internal/circuitbreaker, internal/retry, internal/webhook (HMAC signing)
+scripts/             test-integration.sh, demo.sh
+docs/                ENGINEERING-NOTES.md; docs/archive and the root *.md files are older learning notes
+learning-demos/, test-endpoints/   standalone learning scripts — not built or tested by CI
+```

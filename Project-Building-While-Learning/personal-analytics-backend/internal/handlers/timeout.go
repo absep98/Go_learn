@@ -8,7 +8,9 @@ The goroutine handling that request never returns = goroutine leak.
 After many hung requests: thousands of leaked goroutines = server crash.
 
 Solution: Wrap every request with context.WithTimeout.
-If handler doesn't respond within the deadline, return 504 Gateway Timeout.
+If handler doesn't respond within the deadline, return 503 Service Unavailable.
+(The notes below describe the first, goroutine+select version and why it was
+replaced by http.TimeoutHandler — see "UPDATE" at the bottom of this file.)
 
 === HOW CONTEXT TIMEOUT WORKS ===
 
@@ -49,7 +51,6 @@ To truly cancel work inside the handler, pass ctx to DB/Redis calls:
 */
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -59,46 +60,36 @@ import (
 // Set from config in main.go (default: 10 seconds)
 var RequestTimeout = 10 * time.Second
 
-// TimeoutMiddleware wraps handlers with a deadline
-// If handler takes longer than RequestTimeout, returns 504
+// TimeoutMiddleware wraps handlers with a deadline.
+// If the handler takes longer than RequestTimeout, the client gets 503.
+//
+// FIX (was a data race): the first version ran next(w, r) in a goroutine and,
+// on timeout, wrote a 504 to the SAME ResponseWriter the still-running handler
+// was writing to. `go test -race` flagged it, and the client could receive the
+// handler's late 200 + body instead of the timeout. A handler panic also
+// crashed the whole process, because it happened off the serving goroutine
+// where net/http's recover() can't see it.
+//
+// http.TimeoutHandler solves all three: the handler writes into a buffer
+// guarded by a mutex, the buffer is copied to the real writer only if the
+// handler finishes in time, writes after the deadline get ErrHandlerTimeout,
+// and a handler panic is re-raised on the serving goroutine.
+// It still cancels r.Context() at the deadline, so ctx-aware DB/Redis calls abort.
 func TimeoutMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Create a timeout context from the request's existing context
-		// This preserves any values already in context (request_id, user_id)
-		ctx, cancel := context.WithTimeout(r.Context(), RequestTimeout)
-		defer cancel() // Always cancel to release resources (prevents context leak)
+		start := time.Now()
+		http.TimeoutHandler(next, RequestTimeout, "Request timed out").ServeHTTP(w, r)
 
-		// Replace the request's context with our timeout context
-		// Now any downstream code using r.Context() gets the timeout
-		r = r.WithContext(ctx)
-
-		// Channel to signal when handler completes
-		done := make(chan struct{})
-
-		// Run the handler in a goroutine
-		go func() {
-			next(w, r)
-			close(done) // Signal completion
-		}()
-
-		// Wait for handler to finish OR timeout to expire
-		select {
-		case <-done:
-			// Handler completed normally — response already written
-			return
-
-		case <-ctx.Done():
-			// Timeout! Handler took too long
+		if time.Since(start) >= RequestTimeout {
 			slog.Warn("Request timeout",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"timeout", RequestTimeout.String(),
 			)
-			http.Error(w, "Request timed out", http.StatusGatewayTimeout)
-			return
 		}
 	}
 }
+
 /*
 === INTERVIEW ANSWER: REQUEST TIMEOUT MIDDLEWARE ===
 
@@ -143,4 +134,17 @@ TRADE-OFFS:
 - Response may already be partially written when timeout fires — production would
   use a ResponseWriter wrapper to detect this and avoid writing headers twice.
 - 10s is configurable via REQUEST_TIMEOUT env var.
+
+UPDATE — WHAT WAS WRONG WITH THE DESIGN ABOVE (found with go test -race):
+The "partially written" trade-off was really a data race. Two goroutines wrote
+to one ResponseWriter with no synchronization. Now replaced by http.TimeoutHandler,
+which is exactly that "ResponseWriter wrapper": it buffers the handler's output,
+and whichever side (handler or deadline) takes the mutex first wins.
+Costs of the stdlib version:
+- Status is 503 Service Unavailable, not 504. 504 is what a gateway (nginx)
+  returns when the UPSTREAM is slow; 503 says the app itself shed the request.
+- The response is buffered in memory, and the wrapper does not implement
+  http.Flusher/Hijacker — so no streaming/SSE/WebSocket routes behind it.
+  This API has none.
+Regression tests: timeout_test.go.
 */
